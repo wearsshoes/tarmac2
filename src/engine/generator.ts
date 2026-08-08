@@ -303,19 +303,40 @@ function buildDistricts(rng: RNG, role: Role, archetype: TerminalArchetype, head
   const wAt = (w: number) => side * w;
   const uSpread = primaryLength / 2;
   const open = runways.filter((r) => !r.closed);
-  // Sliding-search helper (harvest H5): first candidate whose keypoints all clear
-  // every runway centerline by the hard margin wins.
-  const clearOfRunways = (points: Point[], margin: number): boolean =>
-    points.every((p) => open.every((r) => {
+  const clearOfRunways = (polygon: Point[], margin: number): boolean => open.every((r) => {
       const [ra, rb] = runwayEndpoints(r.center, r.heading, r.length);
-      return pointSegmentDistance(p, ra, rb) >= margin + r.width / 2;
-    }));
-  const slide = (candidates: number[], keypoints: (u: number) => Point[], margin = 520): number =>
-    candidates.find((u) => clearOfRunways(keypoints(u), margin)) ?? candidates[0]!;
+      const clearance = margin + r.width / 2;
+      if (polygon.some((point) => pointSegmentDistance(point, ra, rb) < clearance)) return false;
+      if (pointInPolygon(ra, polygon) || pointInPolygon(rb, polygon)) return false;
+      for (let i = 0; i < polygon.length; i++) {
+        const a = polygon[i]!; const b = polygon[(i + 1) % polygon.length]!;
+        if (segmentIntersection(ra, rb, a, b)) return false;
+        if (pointSegmentDistance(ra, a, b) < clearance || pointSegmentDistance(rb, a, b) < clearance) return false;
+      }
+      return true;
+    });
+  // Cluster footprints, not just their corners, must clear every runway corridor.
+  const slide = (candidates: number[], footprint: (u: number) => Point[], margin = 520): number =>
+    candidates.find((u) => clearOfRunways(footprint(u), margin)) ?? candidates[0]!;
 
   let terminalSpanU: [number, number] = [0, 0];
   if (complex) {
-    const uTerm = rng.float(-0.18, 0.18) * primaryLength;
+    const preferredU = rng.float(-0.18, 0.18) * primaryLength;
+    const candidates = [preferredU, ...[-0.12, 0.12, -0.25, 0.25, -0.38, 0.38, -0.52, 0.52].map((fraction) => fraction * primaryLength)];
+    const terminalPolygons = (u: number): { buildings: Point[][]; aprons: Point[][] } => {
+      if (midfieldGap) {
+        const mid = (midfieldGap[0] + midfieldGap[1]) / 2;
+        const toWorld = (p: Point) => at(u + p.x, mid + side * (p.y - complex.apronEdgeV / 2));
+        return { buildings: complex.buildings.map((building) => building.polygon.map(toWorld)), aprons: complex.aprons.map((apron) => apron.polygon.map(toWorld)) };
+      }
+      const edgeW = outerW + 250;
+      const toWorld = (p: Point) => at(u + p.x, wAt(edgeW + (complex.apronEdgeV - p.y)));
+      return { buildings: complex.buildings.map((building) => building.polygon.map(toWorld)), aprons: complex.aprons.map((apron) => apron.polygon.map(toWorld)) };
+    };
+    const uTerm = candidates.find((u) => {
+      const polygons = terminalPolygons(u);
+      return polygons.buildings.every((polygon) => clearOfRunways(polygon, 500)) && polygons.aprons.every((polygon) => clearOfRunways(polygon, 120));
+    }) ?? candidates[candidates.length - 1]!;
     if (midfieldGap) {
       // Midfield complex between the runway banks (ATL/DEN pattern).
       const mid = (midfieldGap[0] + midfieldGap[1]) / 2;
@@ -349,7 +370,7 @@ function buildDistricts(rng: RNG, role: Role, archetype: TerminalArchetype, head
     const uGA0 = archetype === "none" ? rng.float(-0.15, 0.1) * primaryLength : rng.pick([-1, 1]) * rng.float(0.55, 0.8) * uSpread;
     const uGA = slide(
       [uGA0, uGA0 - 0.2 * primaryLength, uGA0 + 0.2 * primaryLength, uGA0 - 0.38 * primaryLength, uGA0 + 0.38 * primaryLength],
-      (u) => [at(u - halfLen, gaSide * gaW), at(u + halfLen, gaSide * gaW), at(u - halfLen, gaSide * (gaW + clusterDepth)), at(u + halfLen, gaSide * (gaW + clusterDepth)), at(u, gaSide * (gaW + clusterDepth / 2))],
+      (u) => [at(u - halfLen, gaSide * gaW), at(u + halfLen, gaSide * gaW), at(u + halfLen, gaSide * (gaW + clusterDepth)), at(u - halfLen, gaSide * (gaW + clusterDepth))],
       300,
     );
     aprons.push({
@@ -376,7 +397,7 @@ function buildDistricts(rng: RNG, role: Role, archetype: TerminalArchetype, head
     const half = 320 + ga * 220;
     const uCargo = slide(
       [uCargo0, uCargo0 - 0.18 * primaryLength, uCargo0 + 0.18 * primaryLength, uCargo0 - 0.34 * primaryLength, uCargo0 + 0.34 * primaryLength],
-      (u) => [at(u - half, cargoSide * (networkW + 170)), at(u + half, cargoSide * (networkW + 170)), at(u - half, cargoSide * (networkW + 810)), at(u + half, cargoSide * (networkW + 810))],
+      (u) => [at(u - half, cargoSide * (networkW + 170)), at(u + half, cargoSide * (networkW + 170)), at(u + half, cargoSide * (networkW + 810)), at(u - half, cargoSide * (networkW + 810))],
       300,
     );
     const center = at(uCargo, cargoSide * (networkW + 320));
@@ -394,7 +415,7 @@ function buildDistricts(rng: RNG, role: Role, archetype: TerminalArchetype, head
   // Fuel farm: 2×2 grid of tanks, labeled once.
   {
     const uFuel0 = rng.pick([-1, 1]) * rng.float(0.85, 1) * uSpread;
-    const uFuel = slide([uFuel0, -uFuel0, uFuel0 * 0.7, -uFuel0 * 0.7], (u) => [at(u, side * (networkW + 420)), at(u + 140, side * (networkW + 560))], 300);
+    const uFuel = slide([uFuel0, -uFuel0, uFuel0 * 0.7, -uFuel0 * 0.7], (u) => rect(at(u, side * (networkW + 490)), 260, 260, -heading), 300);
     for (let i = 0; i < 4; i++) {
       buildings.push({ id: `fuel-${i}`, kind: "fuel", label: "FUEL FARM", unlabeled: i > 0, polygon: rect(at(uFuel + (i % 2) * 140 - 70, side * (networkW + 420 + Math.floor(i / 2) * 140)), 100, 100, -heading) });
     }
@@ -405,17 +426,23 @@ function buildDistricts(rng: RNG, role: Role, archetype: TerminalArchetype, head
   for (let i = 0; i < fireCount; i++) {
     const u0 = [(-0.9) * uSpread * 0.6, 0.15 * uSpread, 0.9 * uSpread * 0.7, -0.4 * uSpread][i]!;
     const fireSide = i % 2 === 0 ? side : -side;
-    const u = slide([u0, u0 + 0.15 * primaryLength, u0 - 0.15 * primaryLength], (candidate) => [at(candidate, fireSide * (networkW + 260))], 420);
-    buildings.push({ id: `fire-${i}`, kind: "fire", label: fireCount > 1 ? `FIRE STATION ${i + 1}` : "FIRE STATION", polygon: rect(at(u, fireSide * (networkW + 260)), 180, 130, -heading) });
+    const footprint = (u: number) => rect(at(u, fireSide * (networkW + 260)), 180, 130, -heading);
+    const candidates = [u0, u0 + 0.15 * primaryLength, u0 - 0.15 * primaryLength, u0 + 0.3 * primaryLength, u0 - 0.3 * primaryLength, u0 + 0.45 * primaryLength, u0 - 0.45 * primaryLength];
+    const u = candidates.find((candidate) => clearOfRunways(footprint(candidate), 420));
+    if (u !== undefined) buildings.push({ id: `fire-${i}`, kind: "fire", label: fireCount > 1 ? `FIRE STATION ${i + 1}` : "FIRE STATION", polygon: footprint(u) });
   }
 
   // Military area at 25% of rich fields.
   if ((role === "major-hub" || role === "mega-hub") && rng.chance(0.25)) {
     const uMil = -(terminalSpanU[1] > 0 ? 1 : -1) * rng.float(0.55, 0.8) * uSpread;
     const label = rng.pick(["ANG RAMP", "USAF RESERVE"]);
-    aprons.push({ id: "military-apron", kind: "military", label, polygon: [at(uMil - 420, -side * (networkW + 180)), at(uMil + 420, -side * (networkW + 180)), at(uMil + 420, -side * (networkW + 500)), at(uMil - 420, -side * (networkW + 500))] });
-    for (let i = 0; i < 2; i++) buildings.push({ id: `military-${i}`, kind: "military", label, unlabeled: true, polygon: rect(at(uMil - 180 + i * 360, -side * (networkW + 500 + 360 - 65)), 240, 130, -heading) });
-    throats.push({ id: "military-throat", name: "", points: [at(uMil, -side * (networkW + 200)), at(uMil, -side * networkW)], width: 60, kind: "apron-throat", unlabeled: true });
+    const militaryFootprint = (u: number) => [at(u - 480, -side * (networkW + 180)), at(u + 480, -side * (networkW + 180)), at(u + 480, -side * (networkW + 860)), at(u - 480, -side * (networkW + 860))];
+    const safeUMil = slide([uMil, -uMil, uMil * 0.65, -uMil * 0.65], militaryFootprint, 200);
+    if (clearOfRunways(militaryFootprint(safeUMil), 200)) {
+      aprons.push({ id: "military-apron", kind: "military", label, polygon: [at(safeUMil - 420, -side * (networkW + 180)), at(safeUMil + 420, -side * (networkW + 180)), at(safeUMil + 420, -side * (networkW + 500)), at(safeUMil - 420, -side * (networkW + 500))] });
+      for (let i = 0; i < 2; i++) buildings.push({ id: `military-${i}`, kind: "military", label, unlabeled: true, polygon: rect(at(safeUMil - 180 + i * 360, -side * (networkW + 500 + 360 - 65)), 240, 130, -heading) });
+      throats.push({ id: "military-throat", name: "", points: [at(safeUMil, -side * (networkW + 200)), at(safeUMil, -side * networkW)], width: 60, kind: "apron-throat", unlabeled: true });
+    }
   }
 
   // Hold pads near the biggest runway's thresholds, past the parallel taxiway.
@@ -429,7 +456,9 @@ function buildDistricts(rng: RNG, role: Role, archetype: TerminalArchetype, head
       const across = perp(inward);
       const centerW = primary.center.x * perp(polar(heading)).x + primary.center.y * perp(polar(heading)).y;
       const padSide = Math.sign(side * outerW - centerW) || 1;
-      const center = add(add(endpoint, scale(inward, 500)), scale(across, padSide * (design.runwayTaxiwaySeparation + 300)));
+      const centers = [500, 800, 1100].flatMap((inset) => [padSide, -padSide].map((candidateSide) => add(add(endpoint, scale(inward, inset)), scale(across, candidateSide * (design.runwayTaxiwaySeparation + 300)))));
+      const center = centers.find((candidate) => clearOfRunways(rect(candidate, 300, 220, -primary.heading), 60));
+      if (!center) return;
       const label = rng.chance(0.05) ? "SCENIC HOLD PAD" : labels[i % labels.length]!;
       aprons.push({ id: `hold-pad-${i}`, kind: "hold-pad", label, polygon: rect(center, 300, 220, -primary.heading) });
     });
@@ -440,16 +469,20 @@ function buildDistricts(rng: RNG, role: Role, archetype: TerminalArchetype, head
   for (let i = 0; i < towerCount; i++) {
     const u0 = i === 0 ? (terminalSpanU[0] + terminalSpanU[1]) / 2 + rng.float(-500, 500) : rng.pick([-1, 1]) * rng.float(0.3, 0.6) * uSpread;
     const towerW = side * (networkW + 600 + rng.float(0, 300));
-    const u = slide([u0, u0 + 700, u0 - 700], (candidate) => [at(candidate, towerW)], 420);
+    const u = slide([u0, u0 + 700, u0 - 700, u0 + 1400, u0 - 1400], (candidate) => rect(at(candidate, towerW), 90, 90, -heading), 420);
     buildings.push({ id: `tower-${i}`, kind: "tower", label: "TWR/BCN", unlabeled: i > 0, polygon: rect(at(u, towerW), 90, 90, -heading) });
   }
 
   // Overflow apron named by compass position.
   if (hub && rng.chance(0.6)) {
-    const uOver = rng.pick([-1, 1]) * rng.float(0.35, 0.55) * uSpread;
+    const uOver0 = rng.pick([-1, 1]) * rng.float(0.35, 0.55) * uSpread;
+    const footprint = (u: number) => rect(at(u, -side * (networkW + 300)), 640, 280, -heading);
+    const uOver = slide([uOver0, -uOver0, uOver0 * 1.5, -uOver0 * 1.5], footprint, 100);
     const center = at(uOver, -side * (networkW + 300));
-    aprons.push({ id: "overflow", kind: "overflow", label: `${compassName(center)} RAMP`, polygon: rect(center, 640, 280, -heading) });
-    throats.push({ id: "overflow-throat", name: "", points: [at(uOver, -side * (networkW + 180)), at(uOver, -side * networkW)], width: 60, kind: "apron-throat", unlabeled: true });
+    if (clearOfRunways(footprint(uOver), 100)) {
+      aprons.push({ id: "overflow", kind: "overflow", label: `${compassName(center)} RAMP`, polygon: footprint(uOver) });
+      throats.push({ id: "overflow-throat", name: "", points: [at(uOver, -side * (networkW + 180)), at(uOver, -side * networkW)], width: 60, kind: "apron-throat", unlabeled: true });
+    }
   }
 
   return { buildings, aprons, throats };
@@ -724,7 +757,8 @@ export function generate(seed: string, options: GenerateOptions = {}): SiteModel
   // Mega-hub parallel/satellite complexes go midfield between the banks when the
   // largest bank gap can hold the apron (ATL/DEN pattern); otherwise outboard.
   let midfieldGap: [number, number] | null = null;
-  if (complex && role === "mega-hub" && (archetype === "parallel" || archetype === "satellite")) {
+  const hasMixedRunwayFamilies = runways.some((runway) => !runway.closed && Math.abs(runway.heading - heading) > 1);
+  if (complex && !hasMixedRunwayFamilies && role === "mega-hub" && (archetype === "parallel" || archetype === "satellite")) {
     const sorted = bankWs.slice().sort((one, two) => one - two);
     let best: [number, number] | null = null;
     for (let i = 0; i + 1 < sorted.length; i++) {

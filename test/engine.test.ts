@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { generate, render, type SiteModel } from "../src/engine";
-import { perp, polar, runwayEndpoints } from "../src/engine/geometry";
+import { perp, pointSegmentDistance, polar, runwayEndpoints, segmentIntersection } from "../src/engine/geometry";
 
 const roles = ["basic-ga", "business-ga", "regional", "mid-hub", "major-hub", "mega-hub"] as const;
 
@@ -11,6 +11,16 @@ function pointInPolygon(point: { x: number; y: number }, polygon: Array<{ x: num
     if (((a.y > point.y) !== (b.y > point.y)) && point.x < (b.x - a.x) * (point.y - a.y) / (b.y - a.y || 1) + a.x) inside = !inside;
   }
   return inside;
+}
+
+function clearsRunway(polygon: Array<{ x: number; y: number }>, runway: SiteModel["runways"][number], margin = 25): boolean {
+  const [a, b] = runwayEndpoints(runway.center, runway.heading, runway.length);
+  const clearance = runway.width / 2 + margin;
+  if (pointInPolygon(a, polygon) || pointInPolygon(b, polygon)) return false;
+  return polygon.every((point, index) => {
+    const next = polygon[(index + 1) % polygon.length]!;
+    return pointSegmentDistance(point, a, b) >= clearance && !segmentIntersection(a, b, point, next);
+  });
 }
 
 function taxiwayComponents(model: SiteModel): number {
@@ -172,6 +182,16 @@ describe("airport constraints", () => {
         expect(Math.hypot(pa.x - pb.x, pa.y - pb.y)).toBeGreaterThanOrEqual(500);
       }
       expect(model.lahso.length).toBeLessThanOrEqual(6);
+    }
+  });
+
+  test("runway corridors stay clear of aprons and buildings", () => {
+    for (const role of roles) for (let i = 0; i < 80; i++) {
+      const model = generate(`district-clearance-${i}`, { role });
+      for (const runway of model.runways.filter((candidate) => !candidate.closed)) {
+        for (const apron of model.aprons) expect(clearsRunway(apron.polygon, runway)).toBeTrue();
+        for (const building of model.buildings) expect(clearsRunway(building.polygon, runway)).toBeTrue();
+      }
     }
   });
 });
