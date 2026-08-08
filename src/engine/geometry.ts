@@ -46,6 +46,42 @@ export const runwayEndpoints = (center: Point, heading: number, lengthFt: number
 
 export const pointAlong = (a: Point, b: Point, t: number): Point => ({ x: a.x + (b.x - a.x) * t, y: a.y + (b.y - a.y) * t });
 
+/** Intersection point of segments ab and cd, or null. */
+export function segmentIntersection(a: Point, b: Point, c: Point, d: Point): Point | null {
+  const r = sub(b, a); const s = sub(d, c);
+  const denom = r.x * s.y - r.y * s.x;
+  if (Math.abs(denom) < 1e-9) return null;
+  const t = ((c.x - a.x) * s.y - (c.y - a.y) * s.x) / denom;
+  const u = ((c.x - a.x) * r.y - (c.y - a.y) * r.x) / denom;
+  if (t < 0 || t > 1 || u < 0 || u > 1) return null;
+  return add(a, scale(r, t));
+}
+
+export function pointSegmentDistance(p: Point, a: Point, b: Point): number {
+  const dx = b.x - a.x; const dy = b.y - a.y;
+  const t = Math.max(0, Math.min(1, ((p.x - a.x) * dx + (p.y - a.y) * dy) / (dx * dx + dy * dy || 1)));
+  return Math.hypot(p.x - (a.x + t * dx), p.y - (a.y + t * dy));
+}
+
+export function polylineDistance(one: Point[], two: Point[]): number {
+  let best = Infinity;
+  for (let i = 0; i < one.length - 1; i++) for (let j = 0; j < two.length - 1; j++) {
+    if (segmentIntersection(one[i]!, one[i + 1]!, two[j]!, two[j + 1]!)) return 0;
+  }
+  for (const p of one) for (let k = 0; k < two.length - 1; k++) best = Math.min(best, pointSegmentDistance(p, two[k]!, two[k + 1]!));
+  for (const p of two) for (let k = 0; k < one.length - 1; k++) best = Math.min(best, pointSegmentDistance(p, one[k]!, one[k + 1]!));
+  return best;
+}
+
+export function pointInPolygon(point: Point, polygon: Polygon): boolean {
+  let inside = false;
+  for (let i = 0, j = polygon.length - 1; i < polygon.length; j = i++) {
+    const a = polygon[i]!; const b = polygon[j]!;
+    if (((a.y > point.y) !== (b.y > point.y)) && point.x < (b.x - a.x) * (point.y - a.y) / (b.y - a.y || 1) + a.x) inside = !inside;
+  }
+  return inside;
+}
+
 export function roundedRectPolygon(center: Point, width: number, height: number, radius: number, angle = 0, steps = 3): Polygon {
   const pts: Point[] = [];
   const corners = [

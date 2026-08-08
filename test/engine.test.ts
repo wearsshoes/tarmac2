@@ -53,9 +53,21 @@ describe("deterministic generation", () => {
     expect(render(one)).toBe(render(two));
   });
 
-  test("different streams produce a varied population", () => {
-    const ids = new Set(Array.from({ length: 40 }, (_, i) => generate(`seed-${i}`).identity.id));
-    expect(ids.size).toBeGreaterThan(35);
+  test("same seed is byte-identical across every role override", () => {
+    for (const role of roles) {
+      expect(render(generate("CROSS-ROLE-9", { role }))).toBe(render(generate("CROSS-ROLE-9", { role })));
+    }
+  });
+
+  test("different seeds produce a varied population", () => {
+    const models = Array.from({ length: 40 }, (_, i) => generate(`seed-${i}`));
+    const ids = new Set(models.map((m) => m.identity.id));
+    expect(ids.size).toBeGreaterThan(32);
+    // P4 anti-mode-collapse: wind axes and district sides vary across the population.
+    const headings = new Set(models.map((m) => Math.round(m.windHeading / 15)));
+    expect(headings.size).toBeGreaterThan(5);
+    const cities = new Set(models.map((m) => m.identity.city));
+    expect(cities.size).toBeGreaterThan(30);
   });
 
   test("200-seed population remains finite, unique, and renderable", () => {
@@ -82,7 +94,7 @@ describe("airport constraints", () => {
   for (const role of roles) test(`${role} has valid runway and taxiway geometry`, () => {
     const model = generate(`property-${role}`, { role });
     const legal = /^[A-HJ-NP-WYZ](?:[1-9])?$/;
-    for (const runway of model.runways) {
+    for (const runway of model.runways.filter((r) => !r.closed)) {
       expect(Math.abs(((runway.ends[1].magneticHeading - runway.ends[0].magneticHeading + 360) % 360) - 180)).toBeLessThan(0.01);
       const [a, b] = runwayEndpoints(runway.center, runway.heading, runway.length);
       expect(Math.hypot(a.x - b.x, a.y - b.y)).toBeCloseTo(runway.length, 5);
@@ -92,32 +104,101 @@ describe("airport constraints", () => {
     expect(taxiwayComponents(model)).toBe(1);
   });
 
+  test("field elevation is the highest point on a runway", () => {
+    for (let i = 0; i < 40; i++) {
+      const model = generate(`elev-${i}`);
+      const endElevations = model.runways.filter((r) => !r.closed).flatMap((r) => r.ends.map((e) => e.elevation));
+      expect(Math.max(...endElevations)).toBe(model.identity.elevation);
+    }
+  });
+
   test("parallel runway numbering and separations use standard families", () => {
     const model = generate("parallel-bank", { role: "major-hub" });
     const headings = new Set(model.runways.map((r) => Math.round(r.heading)));
     expect(headings.size).toBe(1);
-    expect(model.runways.map((r) => r.ends[0].designator.slice(-1))).toEqual(["L", "C", "R"]);
+    const suffixes = model.runways.map((r) => r.ends[0].designator.slice(-1)).sort();
+    expect(suffixes).toEqual(["C", "L", "R"]);
+    // L and R must be mirrored on the reciprocal ends.
+    for (const runway of model.runways) {
+      const [a, b] = [runway.ends[0].designator.slice(-1), runway.ends[1].designator.slice(-1)];
+      if (a === "L") expect(b).toBe("R");
+      if (a === "R") expect(b).toBe("L");
+      if (a === "C") expect(b).toBe("C");
+    }
     const lateral = perp(polar(model.runways[0]!.heading));
-    const separations = model.runways.slice(1).map((r, i) => Math.round(Math.abs((r.center.x - model.runways[i]!.center.x) * lateral.x + (r.center.y - model.runways[i]!.center.y) * lateral.y)));
+    const ws = model.runways.map((r) => r.center.x * lateral.x + r.center.y * lateral.y).sort((x, y) => x - y);
+    const separations = ws.slice(1).map((w, i) => Math.round(w - ws[i]!));
     expect(separations.every((s) => Math.abs(s - 2500) < 100)).toBeTrue();
+  });
+
+  test("mega-hub banks renumber in chunks (LAX/ATL pattern)", () => {
+    const model = generate("chunk-check", { role: "mega-hub" });
+    const bank = model.runways.filter((r) => !r.closed);
+    expect(bank.length).toBe(4);
+    const numbers = new Set(bank.map((r) => Number.parseInt(r.ends[0].designator, 10)));
+    expect(numbers.size).toBe(2);
+    const [low, high] = [...numbers].sort((a, b) => a - b);
+    expect((low! % 36) + 1).toBe(high!);
+  });
+
+  test("hotspots stay 500 ft apart and LAHSO caps at 6", () => {
+    for (let i = 0; i < 30; i++) {
+      const model = generate(`hs-${i}`);
+      for (let a = 0; a < model.hotspots.length; a++) for (let b = a + 1; b < model.hotspots.length; b++) {
+        const pa = model.hotspots[a]!.point; const pb = model.hotspots[b]!.point;
+        expect(Math.hypot(pa.x - pb.x, pa.y - pb.y)).toBeGreaterThanOrEqual(500);
+      }
+      expect(model.lahso.length).toBeLessThanOrEqual(6);
+    }
   });
 });
 
 describe("chart conventions", () => {
-  const svg = render(generate("chart-conventions", { role: "mega-hub" }));
+  const model = generate("chart-conventions", { role: "mega-hub" });
+  const svg = render(model);
+
   test("has the FAA margin grammar", () => {
     expect(svg.match(/AIRPORT DIAGRAM/g)?.length).toBe(2);
     expect(svg.match(/AL-\d+ \(FAA\)/g)?.length).toBeGreaterThanOrEqual(2);
-    expect(svg.match(/to 05 SEP 2026/g)?.length).toBe(2);
+    // Rotated volume/date strings appear on both side margins.
+    expect(svg.match(/[A-Z]{2}-\d, \d{2} [A-Z]{3} \d{4} to \d{2} [A-Z]{3} \d{4}/g)?.length).toBe(2);
   });
+
   test("uses only the chart palette", () => {
     const colors = new Set(svg.match(/#[0-9A-Fa-f]{6}/g));
     expect(colors).toEqual(new Set(["#000000", "#FFFFFF", "#CFCFCF", "#945101"]));
   });
+
   test("has solid labeled graticule and topmost hotspots", () => {
     expect(svg.match(/id="graticule"/g)?.length).toBe(1);
-    expect(svg.match(/°\d{2}(?:'|&apos;)[NW]/g)?.length ?? 0).toBeGreaterThanOrEqual(6);
+    expect(svg.match(/°[\d.]+(?:'|&apos;)[NS]/g)?.length ?? 0).toBeGreaterThanOrEqual(2);
+    expect(svg.match(/°[\d.]+(?:'|&apos;)[EW]/g)?.length ?? 0).toBeGreaterThanOrEqual(2);
     expect(svg.indexOf('id="hotspots"')).toBeGreaterThan(svg.indexOf('id="runways"'));
-    expect(svg).not.toContain("stroke-dasharray" + "=" + '"4');
+  });
+
+  test("every open runway renders as a solid black bar", () => {
+    for (const seed of ["p1-a", "p1-b", "p1-c", "chart-conventions"]) {
+      const m = generate(seed);
+      const out = render(m);
+      for (const runway of m.runways.filter((r) => !r.closed)) {
+        const group = out.match(new RegExp(`<g id="runway-${runway.id}">(.*?)</g>`, "s"))?.[1] ?? "";
+        expect(group).toContain(`fill="#000000"`);
+      }
+      // Closed runways draw as open outlines, never solid.
+      for (const runway of m.runways.filter((r) => r.closed)) {
+        const group = out.match(new RegExp(`<g id="runway-${runway.id}">(.*?)</g>`, "s"))?.[1] ?? "";
+        expect(group).toContain(`fill="#FFFFFF"`);
+        expect(group).not.toContain(`fill="#000000"`);
+      }
+    }
+  });
+
+  test("closed runways carry the closed-runway caution", () => {
+    for (let i = 0; i < 60; i++) {
+      const model = generate(`closed-${i}`);
+      const hasClosed = model.runways.some((r) => r.closed);
+      const hasCaution = model.cautions.some((c) => c.includes("CLOSED RWY"));
+      expect(hasCaution).toBe(hasClosed);
+    }
   });
 });

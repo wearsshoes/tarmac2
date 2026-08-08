@@ -79,8 +79,10 @@ function download(blob: Blob, filename: string): void {
   setTimeout(() => URL.revokeObjectURL(url), 1000);
 }
 
+const safeSeed = (): string => seedInput.value.replace(/[^A-Za-z0-9_-]/g, "_");
+
 function exportSvg(): void {
-  download(new Blob([currentSvg], { type: "image/svg+xml;charset=utf-8" }), `${seedInput.value}.svg`);
+  download(new Blob([currentSvg], { type: "image/svg+xml;charset=utf-8" }), `tarmac-${safeSeed()}.svg`);
 }
 
 function exportPng(): void {
@@ -93,7 +95,7 @@ function exportPng(): void {
     if (!context) return;
     context.fillStyle = "white"; context.fillRect(0, 0, canvas.width, canvas.height);
     context.drawImage(image, 0, 0, canvas.width, canvas.height);
-    canvas.toBlob((blob) => { if (blob) download(blob, `${seedInput.value}.png`); }, "image/png");
+    canvas.toBlob((blob) => { if (blob) download(blob, `tarmac-${safeSeed()}@2x.png`); }, "image/png");
     URL.revokeObjectURL(url);
   };
   image.src = url;

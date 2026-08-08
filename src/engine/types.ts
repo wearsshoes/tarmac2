@@ -9,11 +9,13 @@ export interface Identity {
   city: string;
   state: string;
   id: string;
+  icao: string;
   lat: number;
   lon: number;
   elevation: number;
   variation: number;
   region: string;
+  cycle: string;
 }
 
 export interface DesignCode {
@@ -31,7 +33,8 @@ export interface RunwayEnd {
   elevation: number;
   magneticHeading: number;
   displaced: number;
-  treatment?: "blast-pad" | "emas";
+  blastPad: number;
+  emas: number;
 }
 
 export interface Runway {
@@ -54,6 +57,8 @@ export interface Taxiway {
   width: number;
   kind: "parallel" | "connector" | "exit" | "apron-throat" | "service";
   runwayId?: string;
+  /** Suppress the letter label (repair links, throat stubs). */
+  unlabeled?: boolean;
 }
 
 export interface HoldLine {
@@ -61,20 +66,24 @@ export interface HoldLine {
   angle: number;
   taxiwayName: string;
   runwayId: string;
+  kind?: "ils" | "cat2";
 }
 
 export interface Building {
   id: string;
-  kind: "terminal" | "hangar" | "fbo" | "cargo" | "fire" | "tower" | "fuel";
+  kind: "terminal" | "concourse" | "hangar" | "fbo" | "cargo" | "fire" | "tower" | "fuel" | "military";
   label: string;
   polygon: Polygon;
+  /** Suppress the label (repeated hangar bars etc.). */
+  unlabeled?: boolean;
 }
 
 export interface Apron {
   id: string;
-  kind: "terminal" | "ga" | "cargo" | "ron" | "deice";
+  kind: "terminal" | "ga" | "cargo" | "ron" | "deice" | "hold-pad" | "military" | "overflow";
   polygon: Polygon;
   label?: string;
+  tieDowns?: boolean;
 }
 
 export interface Hotspot {
@@ -86,10 +95,17 @@ export interface Hotspot {
   reason: string;
 }
 
+export interface LahsoMark {
+  point: Point;
+  angle: number;
+  runwayId: string;
+}
+
 export interface Frequency {
   label: string;
   value: string;
   detail?: string;
+  partTime?: boolean;
 }
 
 export interface SiteModel {
@@ -106,7 +122,11 @@ export interface SiteModel {
   aprons: Apron[];
   buildings: Building[];
   hotspots: Hotspot[];
+  lahso: LahsoMark[];
   frequencies: Frequency[];
+  rampFrequencies: string[][];
+  cautions: string[];
+  notes: string[];
   terminalArchetype: TerminalArchetype;
   chartNumber: string;
   alNumber: string;
