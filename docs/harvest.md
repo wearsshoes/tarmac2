@@ -214,9 +214,11 @@ and graticule always agree.
 - Label wrap at ~16 chars, splitting at the word boundary nearest the middle, 2 lines max.
 
 **Placement engine:**
-- Spatial hash (64-unit cells) of axis-aligned boxes; ordered-candidate **first-fit**;
-  rotated labels reserve the AABB of the rotated rect.
-- **Tiered policy** (priority = draw order): fixed furniture blocks register first;
+- Airfield-aware whitespace packing for sheet furniture; runway and taxiway paths are
+  sampled into a 6-unit occupancy grid so diagonal layouts leave their real corner
+  whitespace available. Semantic corner/side candidates are ranked by clearance, with
+  a grid-search fallback. See `renderer-layout.md`.
+- **Tiered policy** (priority = draw order): packed furniture blocks register first;
   runway annotations **force-place** (they deposit obstacles but never yield); taxiway
   letters try 3 candidates and drop repeats but keep ≥1 per taxiway; apron labels never
   drop (force candidate 0 + leader); building labels drop entirely on collision;
