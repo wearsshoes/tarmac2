@@ -84,6 +84,71 @@ const sourceConfig = {
       ["YSSY", "Sydney/Kingsford Smith"],
     ],
   },
+  sacaa: {
+    name: "South African Civil Aviation Authority (SACAA)",
+    country: "South Africa",
+    directory: "sacaa-south-africa",
+    license: "Copyright SACAA; verify reuse terms before redistribution",
+    index: "https://www.caa.co.za/aeronautical-charts/",
+    airports: [
+      ["FAOR", "O.R. Tambo International"],
+      ["FACT", "Cape Town International"],
+      ["FALE", "King Shaka International"],
+      ["FAEL", "King Phalo"],
+      ["FAKM", "Kimberley"],
+      ["FAGC", "Grand Central"],
+      ["FAKN", "Kruger Mpumalanga International"],
+      ["FALA", "Lanseria International"],
+      ["FAPE", "Chief Dawid Stuurman International"],
+      ["FAUP", "Upington International"],
+    ],
+  },
+  fintraffic: {
+    name: "Fintraffic ANS",
+    country: "Finland",
+    directory: "fintraffic-finland",
+    license: "Copyright Fintraffic ANS; charts are available free of charge as part of the AIP",
+    index: "https://www.ais.fi/eaip/currently_effective/index.html",
+    pdfBase: "https://www.ais.fi/eaip/currently_effective/documents/Root_WePub/ANSFI/Charts/AD/",
+    airports: [
+      ["EFHK", "Helsinki-Vantaa"],
+      ["EFOU", "Oulu"],
+      ["EFRO", "Rovaniemi"],
+      ["EFIV", "Ivalo"],
+      ["EFKT", "Kittila"],
+      ["EFKU", "Kuopio"],
+      ["EFJO", "Joensuu"],
+      ["EFTP", "Tampere-Pirkkala"],
+    ],
+  },
+  lgs: {
+    name: "Latvijas gaisa satiksme (LGS)",
+    country: "Latvia",
+    directory: "lgs-latvia",
+    license: "Copyright Latvijas gaisa satiksme; verify reuse terms before redistribution",
+    indexBase: "https://ais.lgs.lv/eAIPfiles/2026_005_09-JUL-2026/data/2026-07-09/",
+    airports: [
+      ["EVRA", "Riga International", "1598_EVRA_2_24_1_20250710.pdf"],
+      ["EVLA", "Liepaja International", "1600_EVLA_2_24_1_20250710.pdf"],
+      ["EVRS", "Spilve", "1601_EVRS_2_24_1_20250710.pdf"],
+      ["EVGA", "Lielvarde", "1638_EVGA_2_24_1_20250904.pdf"],
+      ["EVLI", "Limbazi", "1678_EVLI_2_24_1_20260319.pdf"],
+    ],
+  },
+  aai: {
+    name: "Airports Authority of India (AAI)",
+    country: "India",
+    directory: "aai-india",
+    license: "Copyright Airports Authority of India; verify reuse terms before redistribution",
+    indexBase: "https://aim-india.aai.aero/eaip/eaip-v2-06-2026/eAIP/",
+    airports: [
+      ["VIDN", "Dehradun"],
+      ["VOPB", "Port Blair"],
+      ["VEMN", "Dibrugarh"],
+      ["VOPC", "Puducherry"],
+      ["VOBZ", "Vijayawada"],
+    ],
+  },
 };
 
 function sha256(buffer) {
@@ -163,6 +228,62 @@ async function resolveAirservices() {
   });
 }
 
+async function resolveSacaa() {
+  const source = sourceConfig.sacaa;
+  const html = await fetchText(source.index);
+  const rows = [...html.matchAll(/<tr[^>]*>[\s\S]*?<\/tr>/gi)].map(([row]) => row);
+  return source.airports.map(([code, airport]) => {
+    const row = rows.find((candidate) => {
+      const text = candidate.replace(/<[^>]+>/g, " ").replace(/\s+/g, " ");
+      return text.includes(code)
+        && /Aerodrome(?:\/Heliport)? Chart/i.test(text)
+        && /AD[-_]01/i.test(text);
+    });
+    const href = row?.match(/href=['"]([^'"]+\.pdf)['"]/i)?.[1];
+    if (!href) throw new Error(`SACAA aerodrome chart not found for ${code}`);
+    return {
+      code,
+      airport,
+      sourceKey: "sacaa",
+      sourcePage: source.index,
+      pdfUrl: decodeHtml(href),
+    };
+  });
+}
+
+async function resolveFintraffic() {
+  const source = sourceConfig.fintraffic;
+  return source.airports.map(([code, airport]) => ({
+    code,
+    airport,
+    sourceKey: "fintraffic",
+    sourcePage: source.index,
+    pdfUrl: `${source.pdfBase}${code}/EF_AD_2_${code}_ADC.pdf`,
+  }));
+}
+
+async function resolveLgs() {
+  const source = sourceConfig.lgs;
+  return source.airports.map(([code, airport, pdfName]) => ({
+    code,
+    airport,
+    sourceKey: "lgs",
+    sourcePage: `${source.indexBase}html/eAIP/EV-AD-2.${code}-en-GB.html`,
+    pdfUrl: `${source.indexBase}graphics/eAIP/${pdfName}`,
+  }));
+}
+
+async function resolveAai() {
+  const source = sourceConfig.aai;
+  return source.airports.map(([code, airport]) => ({
+    code,
+    airport,
+    sourceKey: "aai",
+    sourcePage: `${source.indexBase}IN-AD%202.1${code}-en-GB.html`,
+    pdfUrl: `${source.indexBase}${code}-ADC.pdf`,
+  }));
+}
+
 async function downloadAndConvert(entry) {
   const source = sourceConfig[entry.sourceKey];
   const directory = path.join(root, source.directory);
@@ -172,6 +293,9 @@ async function downloadAndConvert(entry) {
 
   const response = await fetchWithRetry(entry.pdfUrl);
   const pdf = Buffer.from(await response.arrayBuffer());
+  if (!pdf.subarray(0, 5).equals(Buffer.from("%PDF-"))) {
+    throw new Error(`Expected PDF for ${entry.code}, received ${response.headers.get("content-type") ?? "unknown content"}`);
+  }
   const tempBase = path.join(tmpdir(), `tarmac-${process.pid}-${entry.code}`);
   const pdfPath = `${tempBase}.pdf`;
   const convertedPath = `${tempBase}.svg`;
@@ -207,6 +331,10 @@ const entries = [
   ...(await resolveFaa()),
   ...(await resolveDecea()),
   ...(await resolveAirservices()),
+  ...(await resolveSacaa()),
+  ...(await resolveFintraffic()),
+  ...(await resolveLgs()),
+  ...(await resolveAai()),
 ];
 
 const manifestFiles = [];

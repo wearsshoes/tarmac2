@@ -1,12 +1,16 @@
 # SVG airport-diagram test corpus
 
-This directory contains **45 full aeronautical airport charts: 30 international and
+This directory contains **73 full aeronautical airport charts: 58 international and
 15 U.S.** Each SVG is converted from page 1 of an official publisher PDF and is grouped
 by publisher:
 
 - `faa/` — 15 U.S. Federal Aviation Administration airport diagrams.
 - `decea-brazil/` — 10 Brazilian DECEA aerodrome charts.
 - `airservices-australia/` — 20 Airservices Australia aerodrome charts.
+- `sacaa-south-africa/` — 10 South African Civil Aviation Authority charts.
+- `fintraffic-finland/` — 8 Fintraffic aerodrome charts.
+- `lgs-latvia/` — 5 Latvijas gaisa satiksme aerodrome charts.
+- `aai-india/` — 5 Airports Authority of India aerodrome charts.
 
 These are operational-chart-style references, not simplified airport maps. They retain
 chart furniture, coordinate grids, frequencies, runway dimensions, taxiway labels,
@@ -26,9 +30,16 @@ rasterized for visual inspection:
 - FAA: ITH (Ithaca Tompkins International)
 - DECEA: SBGR (Sao Paulo/Guarulhos International)
 - Airservices Australia: YMML (Melbourne)
+- SACAA: FAOR (O.R. Tambo International)
+- Fintraffic: EFHK (Helsinki-Vantaa)
+- LGS: EVRA (Riga)
+- AAI: VIDN (Dehradun/Jolly Grant)
 
-All three retained the dense, print-chart character expected of the reference set. The
-earlier Wikimedia Commons schematic-layout family was rejected after its EDDB sample
+All seven retained the dense, print-chart character expected of the reference set.
+SACAA is nearly pure black and gray; Fintraffic and LGS use monochrome foundations with
+small safety-color accents; AAI uses a monochrome airport layout with restrained colored
+boundary and marking lines. The earlier Wikimedia Commons schematic-layout family was
+rejected after its EDDB sample
 rasterized as a simplified map without operational chart detail. A UK NATS sample was
 also rejected because its colorful landscape format differed substantially from the
 FAA-style reference; ten additional Airservices charts replaced that family.
