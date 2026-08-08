@@ -236,4 +236,12 @@ describe("chart conventions", () => {
     expect(slots).toContain("top-left");
     expect(slots).toContain("bottom-left");
   });
+
+  test("dense charts do not force text labels on top of other text", () => {
+    for (const role of roles) for (let i = 0; i < 24; i++) {
+      const out = render(generate(`overlap-${i}`, { role }));
+      expect(out).toContain(`data-label-overlaps="0"`);
+      expect(out).toContain(`data-label-overlap-items=""`);
+    }
+  });
 });

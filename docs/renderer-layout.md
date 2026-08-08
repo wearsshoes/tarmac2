@@ -38,6 +38,18 @@ remains the dominant visual element while the text conforms to its silhouette.
 6. Register the chosen furniture boxes with the feature-label placer, then render runway,
    taxiway, building, LAHSO, and hotspot annotations around them.
 
+## Annotation collision contract
+
+Rotated runway annotations reserve the axis-aligned page bounds of their rotated text,
+not the smaller unrotated source box. Required ELEV, heading, dimension, slope, runway-end,
+taxiway, apron, and hotspot labels search progressively wider candidates before falling
+back. Runway strings may change station, side, or distance from the pavement; required
+fallbacks minimize text-on-text overlap before considering overlap with linework, where
+the standard white halo preserves legibility.
+
+The root SVG reports `data-label-overlaps` and `data-label-overlap-items`. The renderer
+population test requires zero forced text-on-text collisions across every airport role.
+
 The generated SVG exposes `data-map-scale` on the root and `data-layout-slot` on movable
 groups. These attributes are diagnostic and regression-test hooks; they do not affect
 the drawing.

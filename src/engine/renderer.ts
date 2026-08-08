@@ -212,33 +212,64 @@ class WhitespacePacker {
 /** Label placement: spatial first-fit with a tiered drop policy (harvest H7). */
 class LabelPlacer {
   boxes: Box[] = [];
+  private labelBoxes: Box[] = [];
+  forcedOverlaps = 0;
+  forcedOverlapLabels: string[] = [];
   reserve(box: Box): void { this.boxes.push(box); }
   overlaps(a: Box): boolean { return this.boxes.some((b) => a.x < b.x + b.w && a.x + a.w > b.x && a.y < b.y + b.h && a.y + a.h > b.y); }
   inFrame(box: Box): boolean { return box.x > FRAME.x + 2 && box.x + box.w < FRAME.x + FRAME.w - 2 && box.y > FRAME.y + 2 && box.y + box.h < FRAME.y + FRAME.h - 2; }
 
-  boxFor(point: Point, text: string, size: number): Box {
+  boxFor(point: Point, text: string, size: number, rotation = 0): Box {
     const w = Math.max(14, text.length * size * 0.6) + 4;
-    return { x: point.x - w / 2, y: point.y - size + 1, w, h: size + 3 };
+    const h = size + 3;
+    const angle = (rotation * Math.PI) / 180;
+    const cos = Math.cos(angle); const sin = Math.sin(angle);
+    const centerOffsetY = -size * 0.35;
+    const cx = point.x - centerOffsetY * sin;
+    const cy = point.y + centerOffsetY * cos;
+    const rw = Math.abs(w * cos) + Math.abs(h * sin);
+    const rh = Math.abs(w * sin) + Math.abs(h * cos);
+    return { x: cx - rw / 2, y: cy - rh / 2, w: rw, h: rh };
+  }
+
+  claim(point: Point, text: string, size: number, rotation = 0): boolean {
+    const box = this.boxFor(point, text, size, rotation);
+    if (!this.inFrame(box) || this.overlaps(box)) return false;
+    this.reserve(box);
+    this.labelBoxes.push(box);
+    return true;
   }
 
   /** Try candidate offsets around the anchor; returns placement or null. */
-  try(anchor: Point, text: string, size: number, candidates: Point[]): { point: Point; leader: boolean } | null {
+  try(anchor: Point, text: string, size: number, candidates: Point[], rotation = 0): { point: Point; leader: boolean } | null {
     for (const [i, offset] of candidates.entries()) {
       const point = { x: anchor.x + offset.x, y: anchor.y + offset.y };
-      const box = this.boxFor(point, text, size);
-      if (this.inFrame(box) && !this.overlaps(box)) {
-        this.reserve(box);
-        return { point, leader: i > 0 && Math.hypot(offset.x, offset.y) > 14 };
-      }
+      if (this.claim(point, text, size, rotation)) return { point, leader: i > 0 && Math.hypot(offset.x, offset.y) > 14 };
     }
     return null;
   }
 
-  /** Force placement at the first candidate (registers the obstacle regardless). */
-  force(anchor: Point, text: string, size: number, offset: Point = { x: 0, y: 0 }): Point {
-    const point = { x: anchor.x + offset.x, y: anchor.y + offset.y };
-    this.reserve(this.boxFor(point, text, size));
-    return point;
+  /** Essential labels use the least-conflicting in-frame fallback, not candidate 0. */
+  forceBest(anchor: Point, text: string, size: number, candidates: Point[], rotation = 0): Point {
+    const overlapArea = (box: Box, others: Box[]): number => others.reduce((sum, other) => {
+      const x = Math.max(0, Math.min(box.x + box.w, other.x + other.w) - Math.max(box.x, other.x));
+      const y = Math.max(0, Math.min(box.y + box.h, other.y + other.h) - Math.max(box.y, other.y));
+      return sum + x * y;
+    }, 0);
+    const ranked = candidates.map((offset, index) => {
+      const point = { x: anchor.x + offset.x, y: anchor.y + offset.y };
+      const box = this.boxFor(point, text, size, rotation);
+      return {
+        point, box, index,
+        labelOverlap: this.inFrame(box) ? overlapArea(box, this.labelBoxes) : Number.POSITIVE_INFINITY,
+        overlap: this.inFrame(box) ? overlapArea(box, this.boxes) : Number.POSITIVE_INFINITY,
+      };
+    }).sort((a, b) => a.labelOverlap - b.labelOverlap || a.overlap - b.overlap || a.index - b.index);
+    const selected = ranked[0] ?? { point: anchor, box: this.boxFor(anchor, text, size, rotation), labelOverlap: 1 };
+    if (selected.labelOverlap > 0) { this.forcedOverlaps++; this.forcedOverlapLabels.push(text); }
+    this.reserve(selected.box);
+    this.labelBoxes.push(selected.box);
+    return selected.point;
   }
 }
 
@@ -428,7 +459,8 @@ function runwayShape(runway: Runway, index: number, projection: Projection, plac
       const bed = rect(add(endpoint, vscale(outward, 40 + end.emas / 2)), runway.width + 20, end.emas, -runway.heading);
       out += `<polygon points="${projection.polygon(bed)}" fill="${WHITE}" class="thin"/>`;
       const labelPoint = projection.point(add(endpoint, vscale(outward, end.emas + 180)));
-      const anchor = placer.force(labelPoint, "EMAS", fonts.blast, { x: 0, y: 0 });
+      const candidates = RING.map((candidate) => ({ x: candidate.x * 0.8, y: candidate.y * 0.8 }));
+      const anchor = placer.try(labelPoint, "EMAS", fonts.blast, candidates)?.point ?? placer.forceBest(labelPoint, "EMAS", fonts.blast, candidates);
       out += text(anchor.x, anchor.y, "EMAS", `class="blast halo" text-anchor="middle"`);
     }
   });
@@ -466,6 +498,18 @@ function runwayShape(runway: Runway, index: number, projection: Projection, plac
   };
   const dimSide = index % 2 === 0 ? 1 : -1;
   const offset = (p: Point, side: number, distance: number): Point => ({ x: p.x + sidePage.x * side * (halfWidthPage + distance), y: p.y + sidePage.y * side * (halfWidthPage + distance) });
+  type LinearPlacement = { point: Point; t: number; side: number; distance: number };
+  const placeLinear = (label: string, size: number, preferredT: number, preferredSide: number, distance: number): LinearPlacement => {
+    const stationDeltas = [0, 0.045, -0.045, 0.09, -0.09, 0.14, -0.14];
+    const candidates: LinearPlacement[] = [];
+    for (const delta of stationDeltas) for (const extra of [0, 10, 22]) for (const side of [preferredSide, -preferredSide]) {
+      const t = Math.max(0.035, Math.min(0.965, preferredT + delta));
+      candidates.push({ point: offset(along(t), side, distance + extra), t, side, distance: distance + extra });
+    }
+    for (const candidate of candidates) if (placer.claim(candidate.point, label, size, foldedAngle)) return candidate;
+    const point = placer.forceBest({ x: 0, y: 0 }, label, size, candidates.map((candidate) => candidate.point), foldedAngle);
+    return candidates.find((candidate) => candidate.point.x === point.x && candidate.point.y === point.y) ?? { ...candidates[0]!, point };
+  };
 
   // End numbers: outside the threshold clearing blast pad / EMAS, rotated to read
   // from final approach (deliberately not folded).
@@ -474,9 +518,13 @@ function runwayShape(runway: Runway, index: number, projection: Projection, plac
     const endpoint = endIndex === 0 ? pa : pb;
     const inward = endIndex === 0 ? dirAB : { x: -dirAB.x, y: -dirAB.y };
     const clear = projection.distance(Math.max(end.blastPad, end.emas)) + 13;
-    const p = { x: endpoint.x - inward.x * clear, y: endpoint.y - inward.y * clear };
     const rotation = (Math.atan2(inward.x, -inward.y) * 180) / Math.PI;
-    placer.reserve(placer.boxFor(p, end.designator, fonts.end));
+    const candidates = [0, 12, 24, 38, 54, 72].flatMap((extra) => [0, 12, -12, 24, -24].map((lateralOffset) => ({
+      x: endpoint.x - inward.x * (clear + extra) + sidePage.x * lateralOffset,
+      y: endpoint.y - inward.y * (clear + extra) + sidePage.y * lateralOffset,
+    })));
+    let p = candidates.find((candidate) => placer.claim(candidate, end.designator, fonts.end, rotation));
+    p ??= placer.forceBest({ x: 0, y: 0 }, end.designator, fonts.end, candidates, rotation);
     out += text(p.x, p.y + fonts.end * 0.36, end.designator, `class="runway-end halo" text-anchor="middle" transform="rotate(${num(rotation)} ${num(p.x)} ${num(p.y)})" font-size="${fonts.end}"`);
   });
 
@@ -484,37 +532,35 @@ function runwayShape(runway: Runway, index: number, projection: Projection, plac
   runway.ends.forEach((end, endIndex) => {
     const tElev = endIndex === 0 ? 0.055 : 1 - 0.055;
     const tHeading = endIndex === 0 ? 0.16 : 1 - 0.16;
-    const elevPoint = offset(along(tElev), -dimSide, 9);
     const elevLabel = `ELEV ${end.elevation}`;
-    placer.reserve(placer.boxFor(elevPoint, elevLabel, fonts.elev));
+    const elevPoint = placeLinear(elevLabel, fonts.elev, tElev, -dimSide, 9).point;
     out += text(elevPoint.x, elevPoint.y, elevLabel, `class="elev halo" text-anchor="middle" transform="rotate(${num(foldedAngle)} ${num(elevPoint.x)} ${num(elevPoint.y)})" font-size="${fonts.elev}"`);
 
-    const headingPoint = offset(along(tHeading), dimSide, 10);
     const inward = endIndex === 0 ? dirAB : { x: -dirAB.x, y: -dirAB.y };
     const headingLabel = `${end.magneticHeading.toFixed(1).padStart(5, "0")}°`;
-    placer.reserve(placer.boxFor(headingPoint, headingLabel, fonts.heading));
+    const headingPlacement = placeLinear(headingLabel, fonts.heading, tHeading, dimSide, 10);
+    const headingPoint = headingPlacement.point;
     out += text(headingPoint.x, headingPoint.y, headingLabel, `class="hdg halo" text-anchor="middle" transform="rotate(${num(foldedAngle)} ${num(headingPoint.x)} ${num(headingPoint.y)})" font-size="${fonts.heading}"`);
     // Along-runway arrow beside the heading value.
-    const arrowBase = offset(along(tHeading + (endIndex === 0 ? 0.045 : -0.045)), dimSide, 10);
+    const arrowBase = offset(along(headingPlacement.t + (endIndex === 0 ? 0.045 : -0.045)), headingPlacement.side, headingPlacement.distance);
     const tip = { x: arrowBase.x + inward.x * 9, y: arrowBase.y + inward.y * 9 };
     const sp = { x: -inward.y, y: inward.x };
     out += `<path d="M${num(arrowBase.x)} ${num(arrowBase.y)}L${num(tip.x)} ${num(tip.y)}M${num(tip.x - inward.x * 3 + sp.x * 2)} ${num(tip.y - inward.y * 3 + sp.y * 2)}L${num(tip.x)} ${num(tip.y)}L${num(tip.x - inward.x * 3 - sp.x * 2)} ${num(tip.y - inward.y * 3 - sp.y * 2)}" class="thin"/>`;
   });
 
   // One dimension label per runway at midfield, side alternating by index.
-  const dimPoint = offset(along(0.5), dimSide, 8);
   const dimLabel = `${runway.length} X ${runway.width}`;
-  placer.reserve(placer.boxFor(dimPoint, dimLabel, fonts.dims));
+  const dimPoint = placeLinear(dimLabel, fonts.dims, 0.5, dimSide, 8).point;
   out += text(dimPoint.x, dimPoint.y, dimLabel, `class="dims halo" text-anchor="middle" transform="rotate(${num(foldedAngle)} ${num(dimPoint.x)} ${num(dimPoint.y)})" font-size="${fonts.dims}"`);
   if (runway.slope >= 0.3) {
     const upEnd = runway.ends[0].elevation > runway.ends[1].elevation ? 0 : 1;
-    const slopePoint = offset(along(0.36), dimSide, 8);
     const slopeLabel = `${runway.slope.toFixed(1)}% UP`;
-    placer.reserve(placer.boxFor(slopePoint, slopeLabel, fonts.minor));
+    const slopePlacement = placeLinear(slopeLabel, fonts.minor, 0.36, dimSide, 8);
+    const slopePoint = slopePlacement.point;
     out += text(slopePoint.x, slopePoint.y, slopeLabel, `class="minor halo" text-anchor="middle" transform="rotate(${num(foldedAngle)} ${num(slopePoint.x)} ${num(slopePoint.y)})" font-size="${fonts.minor}"`);
     // Uphill arrow drawn as a path (font-independent).
     const uphill = upEnd === 0 ? { x: -dirAB.x, y: -dirAB.y } : dirAB;
-    const base = offset(along(0.36 + (upEnd === 0 ? -0.035 : 0.035) * (slopeLabel.length / 8)), dimSide, 8);
+    const base = offset(along(slopePlacement.t + (upEnd === 0 ? -0.035 : 0.035) * (slopeLabel.length / 8)), slopePlacement.side, slopePlacement.distance);
     const tip = { x: base.x + uphill.x * 8, y: base.y + uphill.y * 8 };
     const sp = { x: -uphill.y, y: uphill.x };
     out += `<path d="M${num(base.x)} ${num(base.y)}L${num(tip.x)} ${num(tip.y)}M${num(tip.x - uphill.x * 2.6 + sp.x * 1.8)} ${num(tip.y - uphill.y * 2.6 + sp.y * 1.8)}L${num(tip.x)} ${num(tip.y)}L${num(tip.x - uphill.x * 2.6 - sp.x * 1.8)} ${num(tip.y - uphill.y * 2.6 - sp.y * 1.8)}" class="thin"/>`;
@@ -541,6 +587,7 @@ function taxiwayLabels(model: SiteModel, projection: Projection, placer: LabelPl
         { x: 6 * side, y: -6 * side },
         { x: -8 * side, y: 8 * side },
         { x: 10, y: 10 },
+        ...[0.72, 1.05, 1.45].flatMap((factor) => RING.slice(1).map((point) => ({ x: point.x * factor, y: point.y * factor }))),
       ];
       const placed = placer.try(anchor, taxiway.name, fonts.twy, candidates);
       if (placed) {
@@ -550,7 +597,8 @@ function taxiwayLabels(model: SiteModel, projection: Projection, placer: LabelPl
     }
     if (!placedAny) {
       const anchor = projection.point(pointOnPolyline(taxiway.points, 0.5));
-      const p = placer.force(anchor, taxiway.name, fonts.twy, { x: 7, y: -7 });
+      const candidates = [{ x: 7, y: -7 }, ...[0.8, 1.15, 1.55].flatMap((factor) => RING.slice(1).map((point) => ({ x: point.x * factor, y: point.y * factor })))];
+      const p = placer.try(anchor, taxiway.name, fonts.twy, candidates)?.point ?? placer.forceBest(anchor, taxiway.name, fonts.twy, candidates);
       out += text(p.x, p.y, taxiway.name, `class="twy halo" text-anchor="middle" font-size="${fonts.twy}"`);
     }
   });
@@ -612,7 +660,8 @@ function buildingsLayer(model: SiteModel, projection: Projection, placer: LabelP
     const anchor = projection.point(areaCentroid(building.polygon));
     if (building.kind === "tower") {
       const label = `TWR ${towerElevation(model)}`;
-      const placed = placer.try(anchor, label, fonts.minor, RING.map((o) => ({ x: o.x * 1.4, y: o.y * 1.2 }))) ?? { point: placer.force(anchor, label, fonts.minor, { x: 20, y: -14 }), leader: true };
+      const candidates = RING.map((o) => ({ x: o.x * 1.4, y: o.y * 1.2 }));
+      const placed = placer.try(anchor, label, fonts.minor, candidates) ?? { point: placer.forceBest(anchor, label, fonts.minor, candidates), leader: true };
       out += star(anchor.x, anchor.y - 7, 4.6);
       if (placed.leader) out += `<path d="M${num(anchor.x)} ${num(anchor.y)}L${num(placed.point.x)} ${num(placed.point.y + 2)}"/>`;
       out += text(placed.point.x, placed.point.y, label, `class="minor halo" text-anchor="middle" font-size="${fonts.minor}"`);
@@ -630,9 +679,10 @@ function buildingsLayer(model: SiteModel, projection: Projection, placer: LabelP
   for (const apron of model.aprons) {
     if (!apron.label) continue;
     const anchor = projection.point(areaCentroid(apron.polygon));
-    const placed = placer.try(anchor, apron.label, fonts.minor, RING.map((o) => ({ x: o.x * 2, y: o.y * 1.8 })));
-    const point = placed?.point ?? placer.force(anchor, apron.label, fonts.minor, { x: 0, y: 0 });
-    if (placed?.leader) out += `<path d="M${num(anchor.x)} ${num(anchor.y)}L${num(point.x)} ${num(point.y + 2)}"/>`;
+    const candidates = RING.map((o) => ({ x: o.x * 2, y: o.y * 1.8 }));
+    const placed = placer.try(anchor, apron.label, fonts.minor, candidates);
+    const point = placed?.point ?? placer.forceBest(anchor, apron.label, fonts.minor, candidates);
+    if (placed?.leader || !placed) out += `<path d="M${num(anchor.x)} ${num(anchor.y)}L${num(point.x)} ${num(point.y + 2)}"/>`;
     out += text(point.x, point.y, apron.label, `class="minor halo" text-anchor="middle" font-size="${fonts.minor}"`);
     if (apron.tieDowns) {
       const box = bounds(apron.polygon);
@@ -693,8 +743,12 @@ function hotspotLayer(model: SiteModel, projection: Projection, placer: LabelPla
     const candidates = [
       { x: rx + 20, y: vertical * (ry + 16) }, { x: -(rx + 24), y: vertical * (ry + 16) },
       { x: rx + 26, y: -vertical * (ry + 18) }, { x: 0, y: vertical * (ry + 26) },
+      ...[1, 1.45, 1.9].flatMap((factor) => RING.slice(1).map((offset) => ({
+        x: offset.x * factor + Math.sign(offset.x) * rx,
+        y: offset.y * factor + Math.sign(offset.y) * ry,
+      }))),
     ];
-    const placed = placer.try(p, label, 8, candidates) ?? { point: placer.force(p, label, 8, { x: rx + 20, y: -(ry + 16) }), leader: true };
+    const placed = placer.try(p, label, 8, candidates) ?? { point: placer.forceBest(p, label, 8, candidates), leader: true };
     const lp = placed.point;
     const toward = { x: p.x - lp.x, y: p.y - lp.y };
     const len = Math.hypot(toward.x, toward.y) || 1;
@@ -910,9 +964,14 @@ export function render(model: SiteModel): string {
   }
 
   const runwayInk = runwayLayer(model, projection, placer, fonts);
+  const graticuleInk = graticule(model, projection, placer);
+  const holdInk = holdAndLahso(model, projection, placer, fonts);
+  const buildingInk = buildingsLayer(model, projection, placer, fonts);
+  const taxiwayInk = taxiwayLabels(model, projection, placer, fonts);
+  const hotspotInk = hotspotLayer(model, projection, placer);
   const metadata = { seed: model.seed, role: model.role, archetype: model.terminalArchetype, id: model.identity.id, icao: model.identity.icao };
   return `<?xml version="1.0" encoding="UTF-8"?>\n` +
-    `<svg xmlns="http://www.w3.org/2000/svg" width="900" height="1200" viewBox="0 0 900 1200" role="img" aria-labelledby="chart-title chart-desc" data-map-scale="${num(projection.scaleValue)}">` +
+    `<svg xmlns="http://www.w3.org/2000/svg" width="900" height="1200" viewBox="0 0 900 1200" role="img" aria-labelledby="chart-title chart-desc" data-map-scale="${num(projection.scaleValue)}" data-label-overlaps="${placer.forcedOverlaps}" data-label-overlap-items="${esc(placer.forcedOverlapLabels.join(","))}">` +
     `<title id="chart-title">${esc(model.identity.airportName)} airport diagram</title><desc id="chart-desc">Procedurally generated fictional FAA-style airport diagram for ${esc(model.identity.city)}, ${esc(model.identity.state)}.</desc>` +
     `<metadata>${esc(JSON.stringify(metadata))}</metadata><defs><style>` +
     `text{font-family:Futura,"Avenir Next",Avenir,"Century Gothic",sans-serif;fill:${BLACK};font-weight:500;letter-spacing:.06em}` +
@@ -924,5 +983,5 @@ export function render(model: SiteModel): string {
     `.hotspot{stroke-width:1.2}.hot-text{font-size:7px;letter-spacing:.03em}.underline{text-decoration:underline}` +
     `</style><clipPath id="plot-clip"><rect x="${FRAME.x + 1}" y="${FRAME.y + 1}" width="${FRAME.w - 2}" height="${FRAME.h - 2}"/></clipPath></defs>` +
     `<rect width="${W}" height="${H}" fill="${WHITE}"/>${margins(model)}<rect x="${FRAME.x}" y="${FRAME.y}" width="${FRAME.w}" height="${FRAME.h}" fill="none" stroke="${BLACK}" stroke-width="1.04"/>` +
-    `<g clip-path="url(#plot-clip)">${graticule(model, projection, placer)}${pavement(model, projection)}${runwayInk}${holdAndLahso(model, projection, placer, fonts)}${buildingsLayer(model, projection, placer, fonts)}${taxiwayLabels(model, projection, placer, fonts)}${comm}${fieldElev}${magvar}${bottom}${hotspotLayer(model, projection, placer)}</g></svg>`;
+    `<g clip-path="url(#plot-clip)">${graticuleInk}${pavement(model, projection)}${runwayInk}${holdInk}${buildingInk}${taxiwayInk}${comm}${fieldElev}${magvar}${bottom}${hotspotInk}</g></svg>`;
 }

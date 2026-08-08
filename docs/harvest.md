@@ -220,10 +220,10 @@ and graticule always agree.
   a grid-search fallback. See `renderer-layout.md`.
 - **Tiered policy** (priority = draw order): packed furniture blocks register first;
   runway annotations **force-place** (they deposit obstacles but never yield); taxiway
-  letters try 3 candidates and drop repeats but keep ≥1 per taxiway; apron labels never
-  drop (force candidate 0 + leader); building labels drop entirely on collision;
-  hotspots/LAHSO never drop. Improvement to make: also collision-test runway ELEV boxes
-  against each other (crossing runways could stack them).
+  letters search expanding candidate rings and drop repeats but keep ≥1 per taxiway;
+  apron labels never drop (least-overlap fallback + leader); building labels drop entirely on collision;
+  hotspots/LAHSO never drop. Rotated runway annotations reserve their page-space AABB
+  and search alternate stations, sides, and offsets before a least-overlap fallback.
 
 **Tuned layout constants (page units = 1/100 inch on an 850×1100 page):**
 - Offsets from runway edge: dimensions +9, closed-label +10, heading +11 (with a
