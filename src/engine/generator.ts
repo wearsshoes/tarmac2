@@ -605,37 +605,62 @@ export function generate(seed: string, options: GenerateOptions = {}): SiteModel
   // --- Runways (harvest H3) ---
   const altitudeBoost = Math.max(0, identity.elevation - 2000) * 0.18;
   const primaryLength = snap(Math.min(14000, layout.float(cfg.length[0], cfg.length[1]) + altitudeBoost), 50);
-  const slots = bankSlots(role, layout.derive("bank"), primaryLength);
-
-  // Group into number chunks: 4+ parallels renumber in chunks of 2 (LAX/ATL pattern).
-  const baseNumber = runwayNumber(heading, identity.variation);
-  const chunks: BankSlot[][] = slots.length >= 4
-    ? [slots.slice(0, 2), slots.slice(2)]
-    : [slots];
-
+  const topologyRng = layout.derive("runway-topology");
+  const mixedFamily = role === "mid-hub" ? topologyRng.chance(0.38)
+    : role === "major-hub" ? topologyRng.chance(0.62)
+      : role === "mega-hub" ? topologyRng.chance(0.72)
+        : false;
+  const secondaryCount = !mixedFamily ? 0 : role === "mega-hub" && topologyRng.chance(0.7) ? 2 : 1;
+  const allSlots = bankSlots(role, layout.derive("bank"), primaryLength);
+  // Mixed major fields keep a substantial primary bank, then spend the remaining
+  // runway count on another wind family (MSP/ORD grammar rather than perpetual ATL).
+  const primarySlotCount = secondaryCount === 0 ? allSlots.length : Math.max(2, allSlots.length - secondaryCount);
+  const slots = allSlots.slice(0, primarySlotCount);
   const runways: Runway[] = [];
-  chunks.forEach((chunk, chunkIndex) => {
-    const number = ((baseNumber - 1 + chunkIndex) % 36) + 1;
-    const suffixes = chunk.length === 1 ? [""] : chunk.length === 2 ? ["L", "R"] : ["L", "C", "R"];
-    // Leftmost-first as seen by a pilot on the low-numbered approach: our lateral
-    // axis is the pilot's left when flying the primary heading.
-    const ordered = chunk.slice().sort((one, two) => two.w - one.w);
-    const lowFirst = number <= reciprocalNumber(number);
-    ordered.forEach((slot, i) => {
-      const runwayRng = layout.derive(`runway-${chunkIndex}-${i}`);
-      const length = snap(Math.min(14000, primaryLength * slot.lengthScale), 50);
-      const suffix = suffixes[lowFirst ? i : ordered.length - 1 - i] ?? "";
-      const ends = makeEnds(runwayRng, identity, heading, number, suffix, length > 9000);
-      runways.push({
-        id: `${ends[0].designator}-${ends[1].designator}`,
-        center: at(slot.u, slot.w), heading, length,
-        width: widthFor(length, slot.lengthScale === 1),
-        ends, slope: 0,
-        centerlineLights: design.visibility === "1200" && runwayRng.chance(0.75),
-        pcn: pcnString(length, numbers.derive(`pcn-${chunkIndex}-${i}`)),
+  const appendFamily = (familyHeading: number, familySlots: BankSlot[], familyName: string, origin: Point = { x: 0, y: 0 }): void => {
+    const familyFrame = frame(familyHeading);
+    // Four parallels renumber in two chunks of two (LAX/ATL pattern).
+    const chunks: BankSlot[][] = familySlots.length >= 4 ? [familySlots.slice(0, 2), familySlots.slice(2)] : [familySlots];
+    const baseNumber = runwayNumber(familyHeading, identity.variation);
+    chunks.forEach((chunk, chunkIndex) => {
+      const number = ((baseNumber - 1 + chunkIndex) % 36) + 1;
+      const suffixes = chunk.length === 1 ? [""] : chunk.length === 2 ? ["L", "R"] : ["L", "C", "R"];
+      // Leftmost-first as seen by a pilot on the low-numbered approach.
+      const ordered = chunk.slice().sort((one, two) => two.w - one.w);
+      const lowFirst = number <= reciprocalNumber(number);
+      ordered.forEach((slot, i) => {
+        const runwayKey = familyName === "primary" ? `${chunkIndex}-${i}` : `${familyName}-${chunkIndex}-${i}`;
+        const runwayRng = layout.derive(`runway-${runwayKey}`);
+        const length = snap(Math.min(14000, primaryLength * slot.lengthScale), 50);
+        const suffix = suffixes[lowFirst ? i : ordered.length - 1 - i] ?? "";
+        const ends = makeEnds(runwayRng, identity, familyHeading, number, suffix, length > 9000);
+        runways.push({
+          id: `${ends[0].designator}-${ends[1].designator}`,
+          center: add(origin, familyFrame.at(slot.u, slot.w)), heading: familyHeading, length,
+          width: widthFor(length, familyName === "primary" && slot.lengthScale === 1),
+          ends, slope: 0,
+          centerlineLights: design.visibility === "1200" && runwayRng.chance(0.75),
+          pcn: pcnString(length, numbers.derive(`pcn-${runwayKey}`)),
+        });
       });
     });
-  });
+  };
+  appendFamily(heading, slots, "primary");
+
+  if (secondaryCount > 0) {
+    const secondaryRng = topologyRng.derive("secondary-family");
+    const delta = secondaryRng.pick([1, -1]) * secondaryRng.float(42, 82);
+    const secondaryHeading = ((heading + delta) % 360 + 360) % 360;
+    const crossingU = secondaryRng.pick([1, -1]) * secondaryRng.float(0.2, 0.34) * primaryLength;
+    const origin = at(crossingU, secondaryRng.float(-0.04, 0.04) * primaryLength);
+    const separation = secondaryCount === 2 ? secondaryRng.pick([700, 2400]) : 0;
+    const secondarySlots: BankSlot[] = Array.from({ length: secondaryCount }, (_, index) => ({
+      w: secondaryCount === 1 ? 0 : (index === 0 ? separation / 2 : -separation / 2),
+      u: secondaryRng.float(-0.08, 0.08) * primaryLength,
+      lengthScale: secondaryRng.float(role === "mega-hub" ? 0.72 : 0.62, role === "mid-hub" ? 0.82 : 0.92),
+    }));
+    appendFamily(secondaryHeading, secondarySlots, "secondary", origin);
+  }
 
   // Crosswind runway: GA and windy regional fields; edge-placed, crossing outside
   // the primaries' middle thirds.

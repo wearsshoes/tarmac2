@@ -113,7 +113,7 @@ describe("airport constraints", () => {
   });
 
   test("parallel runway numbering and separations use standard families", () => {
-    const model = generate("parallel-bank", { role: "major-hub" });
+    const model = generate("parallel-3", { role: "major-hub" });
     const headings = new Set(model.runways.map((r) => Math.round(r.heading)));
     expect(headings.size).toBe(1);
     const suffixes = model.runways.map((r) => r.ends[0].designator.slice(-1)).sort();
@@ -129,6 +129,29 @@ describe("airport constraints", () => {
     const ws = model.runways.map((r) => r.center.x * lateral.x + r.center.y * lateral.y).sort((x, y) => x - y);
     const separations = ws.slice(1).map((w, i) => Math.round(w - ws[i]!));
     expect(separations.every((s) => Math.abs(s - 2500) < 100)).toBeTrue();
+  });
+
+  test("large airports vary between parallel banks and mixed runway families", () => {
+    const mixedCounts = new Map<string, number>();
+    for (const role of ["mid-hub", "major-hub", "mega-hub"] as const) {
+      let mixed = 0;
+      for (let i = 0; i < 80; i++) {
+        const model = generate(`topology-${i}`, { role });
+        const headings = [...new Set(model.runways.filter((runway) => !runway.closed).map((runway) => Math.round(runway.heading)))];
+        if (headings.length > 1) {
+          mixed++;
+          const separation = Math.abs(headings[0]! - headings[1]!);
+          const acute = Math.min(separation, 360 - separation);
+          expect(acute).toBeGreaterThanOrEqual(40);
+          expect(acute).toBeLessThanOrEqual(84);
+        }
+      }
+      mixedCounts.set(role, mixed);
+      expect(mixed).toBeLessThan(75); // all-parallel ATL/DEN-style fields still exist
+    }
+    expect(mixedCounts.get("mid-hub")!).toBeGreaterThan(20);
+    expect(mixedCounts.get("major-hub")!).toBeGreaterThan(30);
+    expect(mixedCounts.get("mega-hub")!).toBeGreaterThan(40);
   });
 
   test("mega-hub banks renumber in chunks (LAX/ATL pattern)", () => {
