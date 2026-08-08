@@ -218,12 +218,13 @@ and graticule always agree.
   sampled into a 6-unit occupancy grid so diagonal layouts leave their real corner
   whitespace available. Semantic corner/side candidates are ranked by clearance, with
   a grid-search fallback. See `renderer-layout.md`.
-- **Tiered policy** (priority = draw order): packed furniture blocks register first;
-  runway annotations **force-place** (they deposit obstacles but never yield); taxiway
-  letters search expanding candidate rings and drop repeats but keep ≥1 per taxiway;
-  apron labels never drop (least-overlap fallback + leader); building labels drop entirely on collision;
+- **Tiered policy**: packed furniture registers in chart whitespace; operational runway
+  and taxiway identifiers claim feature-relative positions before facility annotations.
+  Taxiway repeats may drop but each taxiway keeps ≥1 identifier. Apron labels never
+  drop (least-overlap fallback + routed leader); building labels drop entirely on collision;
   hotspots/LAHSO never drop. Rotated runway annotations reserve their page-space AABB
-  and search alternate stations, sides, and offsets before a least-overlap fallback.
+  and search alternate stations plus controlled offsets before a least-overlap fallback.
+  Leaders prefer direct paths, then doglegs, and become obstacles for later labels.
 
 **Tuned layout constants (page units = 1/100 inch on an 850×1100 page):**
 - Offsets from runway edge: dimensions +9, closed-label +10, heading +11 (with a

@@ -41,11 +41,16 @@ remains the dominant visual element while the text conforms to its silhouette.
 ## Annotation collision contract
 
 Rotated runway annotations reserve the axis-aligned page bounds of their rotated text,
-not the smaller unrotated source box. Required ELEV, heading, dimension, slope, runway-end,
-taxiway, apron, and hotspot labels search progressively wider candidates before falling
-back. Runway strings may change station, side, or distance from the pavement; required
-fallbacks minimize text-on-text overlap before considering overlap with linework, where
-the standard white halo preserves legibility.
+not the smaller unrotated source box. Operational labels have first claim on the layout:
+runway labels stay on their assigned runway side and controlled offset while searching
+along the runway; taxiway identifiers search only along their taxiway and its normal.
+Dense taxiway systems may reduce identifier type slightly before using a fallback.
+
+Facility, apron, LAHSO, and hotspot labels place after runway and taxiway identifiers.
+Their leaders try direct and orthogonal dogleg routes, select the shortest route with the
+fewest text crossings, then reserve the chosen line so subsequent labels avoid it.
+Required fallbacks minimize text-on-text overlap before overlap with linework, where the
+standard white halo preserves legibility.
 
 The root SVG reports `data-label-overlaps` and `data-label-overlap-items`. The renderer
 population test requires zero forced text-on-text collisions across every airport role.
