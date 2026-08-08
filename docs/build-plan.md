@@ -12,6 +12,16 @@ page and hot-reloads. The engine itself is pure TS with zero DOM dependencies:
 `generate(seed) → SiteModel` and `render(SiteModel) → SVG string`, so it runs in tests
 and in the page identically. Test runner: `bun test`.
 
+## Status & companion docs
+
+- **Phase 0 is done** (scaffold, dev page, CLI renderer, first test suite). The first
+  working review found the sheet furniture close to spec and the airfield core (Phases
+  1, 4, 5) stubbed — see **`punch-list.md`** for the prioritized fixes; work it in
+  order, since P1–P3 dominate whether a sheet reads as real.
+- **`harvest.md`** holds proven recipes and tuned constants (H1–H9) distilled from a
+  prior generation of this project. When a phase below cites an H-section, start from
+  that recipe rather than inventing fresh. `spec.md` still wins on any conflict.
+
 ## Phase 0 — Scaffold & harness
 - Repo layout: `src/engine/` (pure), `src/app/` (page shell), `test/`, `docs/`,
   `reference/`.
@@ -20,6 +30,7 @@ and in the page identically. Test runner: `bun test`.
 - A `bun run render <seed> [out.svg]` CLI for tests/screenshots.
 
 ## Phase 1 — Geometry kit (the foundation everything leans on)
+*(recipes: harvest H1 RNG, H9 traps; punch-list P2)*
 - Units: feet in a local tangent plane, +x east, +y north; page projection handled
   only at render time (including whole-sheet landscape rotation).
 - Vector/segment/polygon primitives; polygon boolean ops (union, difference) and
@@ -32,12 +43,14 @@ and in the page identically. Test runner: `bun test`.
   priorities, leader-line fallback, halo rendering. (Spec B5: zero collisions.)
 
 ## Phase 2 — Site model
+*(recipes: harvest H2 identity; punch-list P4)*
 - Identity: region → city/state/airport name/location ID, lat/lon, elevation, magnetic
   variation, mutually consistent (spec A1).
 - Role draw (basic GA → mega hub) → design codes (AAC-ADG-TDG), visibility class.
 - Wind axis (+ optional secondary), parcel polygon sized to role, 0–2 edge constraints.
 
 ## Phase 3 — Runway solver (spec A2)
+*(recipes: harvest H3 numbering/L-C-R/stagger/strength)*
 - Primary aligned to wind; length/width from role + elevation/heat.
 - Parallel banks at standard separations (700 / 2,500 / 3,100 / ~5,000 ft, staggers);
   optional crosswind runway (edge-placed, shorter, avoids middle thirds); optional
@@ -46,6 +59,7 @@ and in the page identically. Test runner: `bun test`.
 - Hard constraints: runways + RPZs inside parcel; RPZs building-free forever after.
 
 ## Phase 4 — Taxiway solver (spec A3)
+*(recipes: harvest H4 naming/exits/connectivity/hotspots; punch-list P2, P6)*
 - Full-length parallels (dual where terminal-side), correct CL separations by class.
 - Connector families: end entrances (two 90° turns), mid-field crossings, high-speed
   exits (30°, ~1,500 ft radius, landing-direction), threshold jogs + holding
@@ -56,6 +70,7 @@ and in the page identically. Test runner: `bun test`.
   Connectivity check: one component, touches every runway.
 
 ## Phase 5 — Districts, aprons, buildings (spec A4) — the showpiece
+*(recipes: harvest H5 placement registry, cluster recipes, terminal machinery; punch-list P3)*
 - Perimeter districting: terminal core, GA+FBO, cargo, military, fuel, fire stations,
   deice/RON at hubs.
 - **Terminal grammar module**: compose processor mass + concourses (straight/L/T/Y) +
@@ -71,11 +86,13 @@ and in the page identically. Test runner: `bun test`.
   against MSP/ORD/ATL terminal silhouettes.
 
 ## Phase 6 — Operational data (spec A5)
+*(recipes: harvest H6 builders)*
 - Frequencies by role (sectored at hubs), ramp tables, PCN strings, hotspot derivation
   at genuinely confusable geometry, LAHSO/ILS-hold placement, notes (ASDE-X, RSL),
   chart number / AL number / volume-date strings.
 
 ## Phase 7 — Renderer (spec Part B)
+*(recipes: harvest H7 text/placer/symbols/constants; punch-list P1, P5, P7, P8)*
 - Sheet: margins, repeated titles, neatline (0.010″), rotated volume strings,
   landscape mode.
 - Graticule: solid lines + perpendicular ticks, plain labels (B3).
@@ -117,6 +134,7 @@ Generated-model properties (spec Part A):
 - Determinism: same seed → byte-identical SVG.
 
 ## Phase 9 — Controls (last, after the engine settles)
+*(recipes: harvest H8 IO/app shell)*
 Whatever the finished engine's real degrees of freedom turn out to be — likely just:
 seed, role/archetype override, region, era, texture density, theme. Keep the page a
 chart with a whisper of UI; controls are a garnish, not the product.
