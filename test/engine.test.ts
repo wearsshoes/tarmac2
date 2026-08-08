@@ -201,4 +201,16 @@ describe("chart conventions", () => {
       expect(hasCaution).toBe(hasClosed);
     }
   });
+
+  test("compact airports use the sheet and furniture moves into whitespace", () => {
+    const out = render(generate("LOCALIZER-SIGNAL-76"));
+    const scale = Number(out.match(/data-map-scale="([\d.]+)"/)?.[1]);
+    expect(scale).toBeGreaterThan(0.14);
+
+    const slots = [...out.matchAll(/data-layout-slot="([^"]+)"/g)].map((match) => match[1]!);
+    expect(slots.length).toBeGreaterThanOrEqual(5);
+    expect(new Set(slots).size).toBeGreaterThanOrEqual(4);
+    expect(slots).toContain("top-left");
+    expect(slots).toContain("bottom-left");
+  });
 });

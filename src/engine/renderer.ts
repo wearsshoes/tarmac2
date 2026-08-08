@@ -19,7 +19,7 @@ class Projection {
   rotation: number;
   private center: Point;
 
-  constructor(model: SiteModel) {
+  constructor(model: SiteModel, fill = 0.72) {
     const primary = model.runways[0]!;
     // Predominantly E/W fields use the FAA landscape convention: north points left.
     this.rotation = primary.heading >= 45 && primary.heading <= 135 ? 90 : 0;
@@ -31,12 +31,12 @@ class Projection {
     ].map((p) => rotate(p, this.rotation));
     const box = bounds(content);
     this.center = { x: (box.minX + box.maxX) / 2, y: (box.minY + box.maxY) / 2 };
-    // Responsive page scale: the field occupies ~55% of the plot, but never more
-    // than the scale at which ~2 minutes of latitude fill the plot — GA fields
-    // should look small on the sheet.
-    const fitH = (PLOT.h * 0.55) / Math.max(1, box.maxY - box.minY);
-    const fitW = (PLOT.w * 0.66) / Math.max(1, box.maxX - box.minX);
-    const cap = PLOT.h / 12500;
+    // Fit the actual airport, not an arbitrary 12,500-foot canvas. The latitude cap
+    // still preserves a little more than one whole minute across the plot, while
+    // allowing compact fields to use the sheet instead of collapsing at its center.
+    const fitH = (PLOT.h * fill) / Math.max(1, box.maxY - box.minY);
+    const fitW = (PLOT.w * Math.min(0.84, fill + 0.1)) / Math.max(1, box.maxX - box.minX);
+    const cap = PLOT.h / (FEET_PER_MINUTE * 1.04);
     this.scaleValue = Math.min(fitH, fitW, cap);
   }
 
@@ -56,6 +56,158 @@ class Projection {
 }
 
 type Box = { x: number; y: number; w: number; h: number };
+
+type FurnitureSlot = "top-left" | "top-center" | "top-right" | "center-left" | "center-right" | "bottom-left" | "bottom-center" | "bottom-right" | "free-grid";
+type Placement = Box & { slot: FurnitureSlot };
+
+interface FurniturePlan {
+  comm: Placement;
+  fieldElev: Placement;
+  magVar: Placement;
+  caution: Placement;
+  pcn: Placement;
+  notes?: Placement;
+  ramp?: Placement;
+  forced: number;
+}
+
+const intersects = (a: Box, b: Box): boolean => a.x < b.x + b.w && a.x + a.w > b.x && a.y < b.y + b.h && a.y + a.h > b.y;
+const inflate = (box: Box, amount: number): Box => ({ x: box.x - amount, y: box.y - amount, w: box.w + amount * 2, h: box.h + amount * 2 });
+
+function boxDistance(a: Box, b: Box): number {
+  const dx = Math.max(b.x - (a.x + a.w), a.x - (b.x + b.w), 0);
+  const dy = Math.max(b.y - (a.y + a.h), a.y - (b.y + b.h), 0);
+  return Math.hypot(dx, dy);
+}
+
+function pageBounds(points: Point[], projection: Projection, padding = 0): Box {
+  const box = bounds(points.map((point) => projection.point(point)));
+  return { x: box.minX - padding, y: box.minY - padding, w: box.maxX - box.minX + padding * 2, h: box.maxY - box.minY + padding * 2 };
+}
+
+/** Reserve small boxes along a line instead of one large diagonal AABB. This leaves
+ * the genuine corner whitespace around crossing runways available to chart furniture. */
+function sampledPathBoxes(points: Point[], projection: Projection, radius: number): Box[] {
+  const boxes: Box[] = [];
+  for (let i = 0; i < points.length - 1; i++) {
+    const a = projection.point(points[i]!);
+    const b = projection.point(points[i + 1]!);
+    const length = Math.hypot(b.x - a.x, b.y - a.y);
+    const steps = Math.max(1, Math.ceil(length / Math.max(10, radius * 1.5)));
+    for (let step = 0; step <= steps; step++) {
+      const t = step / steps;
+      const x = a.x + (b.x - a.x) * t;
+      const y = a.y + (b.y - a.y) * t;
+      boxes.push({ x: x - radius, y: y - radius, w: radius * 2, h: radius * 2 });
+    }
+  }
+  return boxes;
+}
+
+/** Packs movable sheet furniture into whitespace around the projected airfield. */
+class WhitespacePacker {
+  private placed: Box[] = [];
+  private readonly cell = 6;
+  private readonly columns = Math.ceil(FRAME.w / this.cell);
+  private readonly rows = Math.ceil(FRAME.h / this.cell);
+  private readonly summed: Uint32Array;
+  forced = 0;
+
+  constructor(private readonly obstacles: Box[]) {
+    const stride = this.columns + 1;
+    const occupied = new Uint8Array(this.columns * this.rows);
+    for (const obstacle of obstacles) {
+      const padded = inflate(obstacle, 5);
+      const x0 = Math.max(0, Math.floor((padded.x - FRAME.x) / this.cell));
+      const x1 = Math.min(this.columns - 1, Math.floor((padded.x + padded.w - FRAME.x) / this.cell));
+      const y0 = Math.max(0, Math.floor((padded.y - FRAME.y) / this.cell));
+      const y1 = Math.min(this.rows - 1, Math.floor((padded.y + padded.h - FRAME.y) / this.cell));
+      for (let y = y0; y <= y1; y++) for (let x = x0; x <= x1; x++) occupied[y * this.columns + x] = 1;
+    }
+    this.summed = new Uint32Array((this.columns + 1) * (this.rows + 1));
+    for (let y = 1; y <= this.rows; y++) {
+      let row = 0;
+      for (let x = 1; x <= this.columns; x++) {
+        row += occupied[(y - 1) * this.columns + x - 1]!;
+        this.summed[y * stride + x] = this.summed[(y - 1) * stride + x]! + row;
+      }
+    }
+  }
+
+  private slot(slot: Exclude<FurnitureSlot, "free-grid">, w: number, h: number): Placement {
+    const left = FRAME.x + 14;
+    const right = FRAME.x + FRAME.w - w - 14;
+    const top = FRAME.y + 14;
+    const bottom = FRAME.y + FRAME.h - h - 14;
+    const centerX = W / 2 - w / 2;
+    const centerY = FRAME.y + FRAME.h / 2 - h / 2;
+    const map: Record<Exclude<FurnitureSlot, "free-grid">, Point> = {
+      "top-left": { x: left, y: top }, "top-center": { x: centerX, y: top }, "top-right": { x: right, y: top },
+      "center-left": { x: left, y: centerY }, "center-right": { x: right, y: centerY },
+      "bottom-left": { x: left, y: bottom }, "bottom-center": { x: centerX, y: bottom }, "bottom-right": { x: right, y: bottom },
+    };
+    return { ...map[slot], w, h, slot };
+  }
+
+  private fits(box: Box): boolean {
+    return box.x >= FRAME.x + 8 && box.y >= FRAME.y + 8 && box.x + box.w <= FRAME.x + FRAME.w - 8 && box.y + box.h <= FRAME.y + FRAME.h - 8 &&
+      !this.airfieldOverlap(inflate(box, 5)) && !this.placed.some((placed) => intersects(inflate(box, 5), placed));
+  }
+
+  private airfieldOverlap(box: Box): boolean {
+    const stride = this.columns + 1;
+    const x0 = Math.max(0, Math.min(this.columns, Math.floor((box.x - FRAME.x) / this.cell)));
+    const x1 = Math.max(0, Math.min(this.columns, Math.ceil((box.x + box.w - FRAME.x) / this.cell)));
+    const y0 = Math.max(0, Math.min(this.rows, Math.floor((box.y - FRAME.y) / this.cell)));
+    const y1 = Math.max(0, Math.min(this.rows, Math.ceil((box.y + box.h - FRAME.y) / this.cell)));
+    const count = this.summed[y1 * stride + x1]! - this.summed[y0 * stride + x1]! - this.summed[y1 * stride + x0]! + this.summed[y0 * stride + x0]!;
+    return count > 0;
+  }
+
+  private clearance(box: Box): number {
+    const all = [...this.obstacles, ...this.placed];
+    return all.length ? Math.min(...all.map((other) => boxDistance(box, other))) : 999;
+  }
+
+  place(w: number, h: number, slots: Array<Exclude<FurnitureSlot, "free-grid">>): Placement {
+    const preferred = slots.map((slot) => this.slot(slot, w, h)).filter((box) => this.fits(box));
+    if (preferred.length > 0) {
+      // Among semantically valid locations, use the emptiest one. The slot order is
+      // only a tie-break, so different airport silhouettes naturally move the blocks.
+      const ranked = preferred.map((box, index) => ({ box, index, clearance: this.clearance(box) }))
+        .sort((a, b) => b.clearance - a.clearance || a.index - b.index);
+      const selected = ranked[0]!.box;
+      this.placed.push(selected);
+      return selected;
+    }
+
+    const candidates: Placement[] = [];
+    for (let y = FRAME.y + 10; y <= FRAME.y + FRAME.h - h - 10; y += 12) {
+      for (let x = FRAME.x + 10; x <= FRAME.x + FRAME.w - w - 10; x += 12) candidates.push({ x, y, w, h, slot: "free-grid" });
+    }
+    const preferredTargets = slots.map((slot) => this.slot(slot, w, h));
+    const preferenceDistance = (box: Box): number => Math.min(...preferredTargets.map((target) => Math.hypot(box.x - target.x, box.y - target.y)));
+    candidates.sort((a, b) => preferenceDistance(a) - preferenceDistance(b));
+    const clear = candidates.find((box) => this.fits(box));
+    if (clear) {
+      this.placed.push(clear);
+      return clear;
+    }
+
+    // A dense chart can exhaust every clean rectangle. Keep the least-overlapping
+    // result as a signal to the outer scale solver, which retries at a smaller fill.
+    const overlapArea = (box: Box): number => [...this.obstacles, ...this.placed].reduce((sum, other) => {
+      const x = Math.max(0, Math.min(box.x + box.w, other.x + other.w) - Math.max(box.x, other.x));
+      const y = Math.max(0, Math.min(box.y + box.h, other.y + other.h) - Math.max(box.y, other.y));
+      return sum + x * y;
+    }, 0);
+    candidates.sort((a, b) => overlapArea(a) - overlapArea(b));
+    const selected = candidates[0] ?? { x: FRAME.x + 10, y: FRAME.y + 10, w, h, slot: "free-grid" as const };
+    this.placed.push(selected);
+    this.forced++;
+    return selected;
+  }
+}
 
 /** Label placement: spatial first-fit with a tiered drop policy (harvest H7). */
 class LabelPlacer {
@@ -554,35 +706,90 @@ function hotspotLayer(model: SiteModel, projection: Projection, placer: LabelPla
   return `${out}</g>`;
 }
 
-function commBlock(model: SiteModel, placer: LabelPlacer): string {
-  let out = `<g id="comm-block">`;
-  let y = 126;
-  const x = 70;
+const textWidth = (value: string, size: number): number => Math.max(14, value.length * size * 0.6);
+
+function airfieldObstacles(model: SiteModel, projection: Projection): Box[] {
+  const obstacles: Box[] = [];
+  for (const runway of model.runways) {
+    const [a, b] = runwayEndpoints(runway.center, runway.heading, runway.length);
+    obstacles.push(...sampledPathBoxes([a, b], projection, Math.max(13, projection.distance(runway.width) / 2 + 12)));
+  }
+  for (const taxiway of model.taxiways) obstacles.push(...sampledPathBoxes(taxiway.points, projection, Math.max(6, projection.distance(taxiway.width) / 2 + 5)));
+  for (const apron of model.aprons) obstacles.push(pageBounds(apron.polygon, projection, 10));
+  for (const building of model.buildings) obstacles.push(pageBounds(building.polygon, projection, 10));
+  for (const hotspot of model.hotspots) {
+    const point = projection.point(hotspot.point);
+    const rx = Math.max(7, projection.distance(hotspot.rx)) + 30;
+    const ry = Math.max(5.4, projection.distance(hotspot.ry)) + 24;
+    obstacles.push({ x: point.x - rx, y: point.y - ry, w: rx * 2, h: ry * 2 });
+  }
+  return obstacles;
+}
+
+function furniturePlan(model: SiteModel, projection: Projection): FurniturePlan {
+  const packer = new WhitespacePacker(airfieldObstacles(model, projection));
+  const commLines = model.frequencies.flatMap((frequency) => [
+    `${frequency.label}${frequency.partTime ? " ★" : ""}`,
+    `${frequency.value}${frequency.detail ? ` ${frequency.detail}` : ""}`,
+  ]);
+  const commW = Math.max(128, ...commLines.map((line) => textWidth(line, 8))) + 12;
+  const commH = Math.max(34, model.frequencies.length * 21 + 8);
+  const comm = packer.place(commW, commH, ["top-left", "top-right", "center-left", "center-right"]);
+
+  const cautionW = Math.min(430, Math.max(280, ...model.cautions.map((line) => textWidth(line, 8) + 14)));
+  const cautionH = Math.max(28, model.cautions.length * 12 + 8);
+  const caution = packer.place(cautionW, cautionH, ["bottom-center", "top-center", "bottom-left", "bottom-right"]);
+
+  const magVar = packer.place(180, 126, ["bottom-right", "bottom-left", "center-right", "center-left"]);
+
+  const pcnLines = model.runways.filter((runway) => !runway.closed && runway.pcn).map((runway) => `RWY ${runway.id}  ${runway.pcn}`);
+  const pcnW = Math.max(170, ...pcnLines.map((line) => textWidth(line, 7) + 10));
+  const pcnH = Math.max(20, pcnLines.length * 10 + 8);
+  const pcn = packer.place(pcnW, pcnH, ["bottom-left", "bottom-right", "center-left", "center-right", "top-left"]);
+
+  const notes = model.notes.length > 0
+    ? packer.place(Math.max(120, ...model.notes.map((note) => textWidth(note, 7) + 10)), model.notes.length * 11 + 8, ["center-left", "center-right", "bottom-left", "top-left", "bottom-right"])
+    : undefined;
+
+  const ramp = model.rampFrequencies.length > 0
+    ? packer.place(148, model.rampFrequencies.length * 10 + 22, ["bottom-right", "center-right", "bottom-left", "top-right"])
+    : undefined;
+
+  const fieldLabel = `FIELD ELEV ${model.identity.elevation}`;
+  const fieldW = textWidth(fieldLabel, 8) + 14;
+  const commOnLeft = comm.x + comm.w / 2 < W / 2;
+  const fieldElev = packer.place(fieldW, 25, commOnLeft
+    ? ["top-right", "bottom-right", "center-right", "bottom-left"]
+    : ["top-left", "bottom-left", "center-left", "bottom-right"]);
+
+  return { comm, fieldElev, magVar, caution, pcn, notes, ramp, forced: packer.forced };
+}
+
+function commBlock(model: SiteModel, placement: Placement): string {
+  const rightAligned = placement.x + placement.w / 2 > W / 2;
+  const x = rightAligned ? placement.x + placement.w - 6 : placement.x + 6;
+  let out = `<g id="comm-block" data-layout-slot="${placement.slot}">`;
+  let y = placement.y + 12;
   for (const freq of model.frequencies) {
-    out += text(x, y, `${freq.label}${freq.partTime ? " ★" : ""}`, `class="small halo"`);
+    out += text(x, y, `${freq.label}${freq.partTime ? " ★" : ""}`, `class="small halo"${rightAligned ? ` text-anchor="end"` : ""}`);
     y += 10;
-    out += text(x, y, `${freq.value}${freq.detail ? ` ${freq.detail}` : ""}`, `class="small halo"`);
+    out += text(x, y, `${freq.value}${freq.detail ? ` ${freq.detail}` : ""}`, `class="small halo"${rightAligned ? ` text-anchor="end"` : ""}`);
     y += 11;
   }
-  placer.reserve({ x: x - 6, y: 112, w: 210, h: y - 112 });
   return `${out}</g>`;
 }
 
-function fieldElevBox(model: SiteModel, placer: LabelPlacer): string {
+function fieldElevBox(model: SiteModel, placement: Placement): string {
   const label = `FIELD ELEV ${model.identity.elevation}`;
-  const w = label.length * 5.4 + 14;
-  const x = FRAME.x + FRAME.w - w - 22;
-  placer.reserve({ x, y: 114, w, h: 26 });
-  return `<rect x="${num(x)}" y="116" width="${num(w)}" height="21" fill="${WHITE}" class="thin"/>` +
-    text(x + w / 2, 130, label, `class="small" text-anchor="middle"`);
+  return `<g id="field-elevation" data-layout-slot="${placement.slot}"><rect x="${num(placement.x)}" y="${num(placement.y)}" width="${num(placement.w)}" height="21" fill="${WHITE}" class="thin"/>` +
+    text(placement.x + placement.w / 2, placement.y + 14, label, `class="small" text-anchor="middle"`) + `</g>`;
 }
 
 /** Mag-var assembly (harvest H7): filled true-north head, open-V magnetic head,
  * VAR label on the side away from the magnetic arm, epoch beneath. */
-function magVar(model: SiteModel, projection: Projection, placer: LabelPlacer): string {
-  const x = 735;
-  const y = 700;
-  placer.reserve({ x: x - 90, y: y - 14, w: 180, h: 138 });
+function magVar(model: SiteModel, projection: Projection, placement: Placement): string {
+  const x = placement.x + placement.w / 2;
+  const y = placement.y + 70;
   const variation = model.identity.variation;
   const sign = variation < 0 ? "W" : "E";
   const northPage = projection.direction({ x: 0, y: 1 });
@@ -592,7 +799,7 @@ function magVar(model: SiteModel, projection: Projection, placer: LabelPlacer): 
   const magTip = { x: x + magPage.x * arm * 0.94, y: y + magPage.y * arm * 0.94 };
   const tPerp = { x: -northPage.y, y: northPage.x };
   const mPerp = { x: -magPage.y, y: magPage.x };
-  let out = `<g id="mag-var" class="thin">`;
+  let out = `<g id="mag-var" class="thin" data-layout-slot="${placement.slot}">`;
   out += `<path d="M${num(x)} ${num(y)}L${num(trueTip.x)} ${num(trueTip.y)}"/>`;
   out += `<polygon points="${num(trueTip.x)},${num(trueTip.y)} ${num(trueTip.x - northPage.x * 7 + tPerp.x * 2.6)},${num(trueTip.y - northPage.y * 7 + tPerp.y * 2.6)} ${num(trueTip.x - northPage.x * 7 - tPerp.x * 2.6)},${num(trueTip.y - northPage.y * 7 - tPerp.y * 2.6)}" fill="${BLACK}" stroke="none"/>`;
   out += `<path d="M${num(x)} ${num(y)}L${num(magTip.x)} ${num(magTip.y)}"/>`;
@@ -606,44 +813,47 @@ function magVar(model: SiteModel, projection: Projection, placer: LabelPlacer): 
   return `${out}</g>`;
 }
 
-function bottomBlocks(model: SiteModel, placer: LabelPlacer): string {
+function bottomBlocks(model: SiteModel, plan: FurniturePlan): string {
   let out = `<g id="bottom-blocks">`;
-  // PCN block: pinned bottom-left.
+  // Each text/table block is independently packed into available whitespace.
   const pcnLines = model.runways.filter((r) => !r.closed && r.pcn).map((r) => `RWY ${r.id}  ${r.pcn}`);
-  let y = FRAME.y + FRAME.h - 18 - pcnLines.length * 10;
-  placer.reserve({ x: 66, y: y - 10, w: 240, h: pcnLines.length * 10 + 14 });
-  for (const line of pcnLines) { out += text(70, y, line, `class="minor halo"`); y += 10; }
+  let y = plan.pcn.y + 10;
+  out += `<g id="pcn-block" data-layout-slot="${plan.pcn.slot}">`;
+  for (const line of pcnLines) { out += text(plan.pcn.x + 4, y, line, `class="minor halo"`); y += 10; }
+  out += `</g>`;
 
-  // Caution block grows upward from the bottom margin, centered.
-  const cautionY = FRAME.y + FRAME.h - 8 - (model.cautions.length - 1) * 12;
-  placer.reserve({ x: W / 2 - 210, y: cautionY - 12, w: 420, h: model.cautions.length * 12 + 6 });
+  const cautionX = plan.caution.x + plan.caution.w / 2;
+  const cautionY = plan.caution.y + 11;
+  out += `<g id="caution-block" data-layout-slot="${plan.caution.slot}">`;
   model.cautions.forEach((line, i) => {
     const cls = i === 1 ? "small underline halo" : "small halo";
-    out += text(W / 2, cautionY + i * 12, line, `class="${cls}" text-anchor="middle"`);
+    out += text(cautionX, cautionY + i * 12, line, `class="${cls}" text-anchor="middle"`);
   });
+  out += `</g>`;
 
-  // Ramp-frequency table (hubs): boxed, underlined heading, bottom-right.
-  if (model.rampFrequencies.length > 0) {
+  if (model.rampFrequencies.length > 0 && plan.ramp) {
     const rows = model.rampFrequencies;
-    const boxH = rows.length * 10 + 22;
-    const boxW = 148;
-    const bx = FRAME.x + FRAME.w - boxW - 20;
-    const by = FRAME.y + FRAME.h - boxH - 46;
-    placer.reserve({ x: bx - 4, y: by - 4, w: boxW + 8, h: boxH + 8 });
-    out += `<rect x="${num(bx)}" y="${num(by)}" width="${boxW}" height="${num(boxH)}" fill="${WHITE}" class="thin"/>`;
+    const boxH = plan.ramp.h;
+    const boxW = plan.ramp.w;
+    const bx = plan.ramp.x;
+    const by = plan.ramp.y;
+    out += `<g id="ramp-frequency-block" data-layout-slot="${plan.ramp.slot}"><rect x="${num(bx)}" y="${num(by)}" width="${boxW}" height="${num(boxH)}" fill="${WHITE}" class="thin"/>`;
     out += text(bx + 8, by + 13, "RAMP FREQUENCIES", `class="minor underline"`);
     rows.forEach(([name, freq], i) => {
       out += text(bx + 8, by + 26 + i * 10, name!, `class="minor"`);
       out += text(bx + boxW - 8, by + 26 + i * 10, freq!, `class="minor" text-anchor="end"`);
     });
+    out += `</g>`;
   }
 
-  // Notes as free text above the PCN block.
-  let noteY = FRAME.y + FRAME.h - 34 - model.runways.length * 10 - model.notes.length * 11;
-  for (const note of model.notes) {
-    placer.reserve({ x: 66, y: noteY - 9, w: 230, h: 11 });
-    out += text(70, noteY, note, `class="minor halo"`);
-    noteY += 11;
+  if (plan.notes) {
+    let noteY = plan.notes.y + 10;
+    out += `<g id="notes-block" data-layout-slot="${plan.notes.slot}">`;
+    for (const note of model.notes) {
+      out += text(plan.notes.x + 4, noteY, note, `class="minor halo"`);
+      noteY += 11;
+    }
+    out += `</g>`;
   }
   return `${out}</g>`;
 }
@@ -664,18 +874,29 @@ function margins(model: SiteModel): string {
 }
 
 export function render(model: SiteModel): string {
-  const projection = new Projection(model);
+  // Prefer a large planview, then back off only when the movable furniture cannot
+  // find clean whitespace. Dense hubs therefore retain enough annotation room while
+  // compact fields are no longer constrained by a global 12,500-foot scale.
+  let projection = new Projection(model);
+  let furniture = furniturePlan(model, projection);
+  for (const fill of [0.68, 0.64, 0.6, 0.56]) {
+    if (furniture.forced === 0) break;
+    projection = new Projection(model, fill);
+    furniture = furniturePlan(model, projection);
+  }
   const placer = new LabelPlacer();
   const dense = projection.scaleValue / 1 < 0.026 || model.runways.length >= 5;
   const fonts: FontScale = dense
     ? { end: 9.5, heading: 6.5, dims: 7, elev: 6.5, twy: 6, minor: 6, blast: 6 }
     : { end: 10.5, heading: 7.5, dims: 8, elev: 7, twy: 7, minor: 7, blast: 6.5 };
 
-  // Fixed furniture registers first (tiered policy).
-  const comm = commBlock(model, placer);
-  const fieldElev = fieldElevBox(model, placer);
-  const magvar = magVar(model, projection, placer);
-  const bottom = bottomBlocks(model, placer);
+  // Whitespace-packed furniture registers first for the feature-label placer.
+  const furnitureBoxes = [furniture.comm, furniture.fieldElev, furniture.magVar, furniture.caution, furniture.pcn, furniture.notes, furniture.ramp].filter((box): box is Placement => Boolean(box));
+  for (const box of furnitureBoxes) placer.reserve(inflate(box, 4));
+  const comm = commBlock(model, furniture.comm);
+  const fieldElev = fieldElevBox(model, furniture.fieldElev);
+  const magvar = magVar(model, projection, furniture.magVar);
+  const bottom = bottomBlocks(model, furniture);
 
   // Runway bars deposit obstacles along their centerlines.
   for (const runway of model.runways) {
@@ -691,7 +912,7 @@ export function render(model: SiteModel): string {
   const runwayInk = runwayLayer(model, projection, placer, fonts);
   const metadata = { seed: model.seed, role: model.role, archetype: model.terminalArchetype, id: model.identity.id, icao: model.identity.icao };
   return `<?xml version="1.0" encoding="UTF-8"?>\n` +
-    `<svg xmlns="http://www.w3.org/2000/svg" width="900" height="1200" viewBox="0 0 900 1200" role="img" aria-labelledby="chart-title chart-desc">` +
+    `<svg xmlns="http://www.w3.org/2000/svg" width="900" height="1200" viewBox="0 0 900 1200" role="img" aria-labelledby="chart-title chart-desc" data-map-scale="${num(projection.scaleValue)}">` +
     `<title id="chart-title">${esc(model.identity.airportName)} airport diagram</title><desc id="chart-desc">Procedurally generated fictional FAA-style airport diagram for ${esc(model.identity.city)}, ${esc(model.identity.state)}.</desc>` +
     `<metadata>${esc(JSON.stringify(metadata))}</metadata><defs><style>` +
     `text{font-family:Futura,"Avenir Next",Avenir,"Century Gothic",sans-serif;fill:${BLACK};font-weight:500;letter-spacing:.06em}` +
