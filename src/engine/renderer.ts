@@ -1160,12 +1160,20 @@ function furniturePlan(model: SiteModel, projection: Projection): FurniturePlan 
 function commBlock(model: SiteModel, placement: Placement): string {
   const rightAligned = placement.x + placement.w / 2 > W / 2;
   const x = rightAligned ? placement.x + placement.w - 6 : placement.x + 6;
-  let out = `<g id="comm-block" data-layout-slot="${placement.slot}">`;
+  // Opaque backing: the frequency list is unboxed, and a text halo alone lets
+  // the graticule show through between glyphs and between the stacked lines.
+  const commW = Math.max(60, ...model.frequencies.flatMap((freq) => [
+    textWidth(`${freq.label}${freq.partTime ? " ★" : ""}`, 8.5),
+    textWidth(`${freq.value}${freq.detail ? ` ${freq.detail}` : ""}`, 8.5),
+  ])) + 12;
+  const commH = model.frequencies.length * 21 + 8;
+  let out = `<g id="comm-block" data-layout-slot="${placement.slot}">` +
+    `<rect x="${num(rightAligned ? x + 6 - commW : x - 6)}" y="${num(placement.y + 2)}" width="${num(commW)}" height="${num(commH)}" fill="${WHITE}" stroke="none"/>`;
   let y = placement.y + 12;
   for (const freq of model.frequencies) {
-    out += text(x, y, `${freq.label}${freq.partTime ? " ★" : ""}`, `class="small halo"${rightAligned ? ` text-anchor="end"` : ""}`);
+    out += text(x, y, `${freq.label}${freq.partTime ? " ★" : ""}`, `class="small"${rightAligned ? ` text-anchor="end"` : ""}`);
     y += 10;
-    out += text(x, y, `${freq.value}${freq.detail ? ` ${freq.detail}` : ""}`, `class="small halo"${rightAligned ? ` text-anchor="end"` : ""}`);
+    out += text(x, y, `${freq.value}${freq.detail ? ` ${freq.detail}` : ""}`, `class="small"${rightAligned ? ` text-anchor="end"` : ""}`);
     y += 11;
   }
   // Boxed negative-D: declared-distance information is available elsewhere.
@@ -1269,9 +1277,14 @@ function bottomBlocks(model: SiteModel, plan: FurniturePlan): string {
 
   if (plan.notes) {
     let noteY = plan.notes.y + 10;
-    out += `<g id="notes-block" data-layout-slot="${plan.notes.slot}">`;
+    // Opaque backing rather than only a text halo: a 2px outline still lets a
+    // graticule line show through the gaps between glyphs, so free-standing
+    // notes read as if the line runs through them.
+    const noteW = Math.max(...model.notes.map((note) => textWidth(note, 7.7))) + 10;
+    out += `<g id="notes-block" data-layout-slot="${plan.notes.slot}">` +
+      `<rect x="${num(plan.notes.x + 1)}" y="${num(plan.notes.y + 1)}" width="${num(noteW)}" height="${num(model.notes.length * 11 + 4)}" fill="${WHITE}" stroke="none"/>`;
     for (const note of model.notes) {
-      out += text(plan.notes.x + 4, noteY, note, `class="minor halo"`);
+      out += text(plan.notes.x + 4, noteY, note, `class="minor"`);
       noteY += 11;
     }
     out += `</g>`;
