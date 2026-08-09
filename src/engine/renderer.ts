@@ -1315,11 +1315,13 @@ function margins(model: SiteModel): string {
   const { identity: id } = model;
   const right = `${id.airportName} (${id.id})`;
   const city = `${id.city.toUpperCase()}, ${id.state}`;
+  // Title sits close above the neatline (frame top is y=72) rather than floating
+  // in the middle of the margin, and is set large — it is the sheet's masthead.
   return `<g id="margins">` +
-    text(40, 24, model.chartNumber, `class="micro"`) + text(40, 42, "AIRPORT DIAGRAM", `class="title"`) +
-    text(W / 2, 37, model.alNumber, `class="margin" text-anchor="middle"`) +
-    text(860, 28, right, `class="margin" text-anchor="end"`) + text(860, 42, city, `class="small" text-anchor="end"`) +
-    text(40, 1163, "AIRPORT DIAGRAM", `class="title"`) + text(40, 1178, model.chartNumber, `class="micro"`) +
+    text(40, 30, model.chartNumber, `class="micro"`) + text(40, 62, "AIRPORT DIAGRAM", `class="title"`) +
+    text(W / 2, 50, model.alNumber, `class="margin" text-anchor="middle"`) +
+    text(860, 38, right, `class="margin" text-anchor="end"`) + text(860, 56, city, `class="small" text-anchor="end"`) +
+    text(40, 1158, "AIRPORT DIAGRAM", `class="title"`) + text(40, 1176, model.chartNumber, `class="micro"`) +
     text(860, 1163, city, `class="small" text-anchor="end"`) + text(860, 1178, right, `class="margin" text-anchor="end"`) +
     text(17, H / 2, model.cycle, `class="effectivity" text-anchor="middle" transform="rotate(-90 17 ${H / 2})"`) +
     text(883, H / 2, model.cycle, `class="effectivity" text-anchor="middle" transform="rotate(90 883 ${H / 2})"`) + `</g>`;
@@ -1338,9 +1340,12 @@ export function render(model: SiteModel): string {
   }
   const placer = new LabelPlacer();
   const dense = projection.scaleValue < 0.026 || model.runways.length >= 5 || model.taxiways.length >= 36;
+  // The dense tier used to fall to 6pt, which is where sheets read as
+  // under-set: a busy chart is exactly the one whose labels most need to be
+  // legible. Dense now shrinks only slightly rather than collapsing.
   const fonts: FontScale = dense
-    ? { end: 9.5, heading: 6.5, dims: 7, elev: 6.5, twy: 6, minor: 6, blast: 6 }
-    : { end: 10.5, heading: 7.5, dims: 8, elev: 7, twy: 7, minor: 7, blast: 6.5 };
+    ? { end: 10.5, heading: 7.4, dims: 7.9, elev: 7.2, twy: 7.2, minor: 7.1, blast: 6.8 }
+    : { end: 11.5, heading: 8, dims: 8.6, elev: 7.6, twy: 7.8, minor: 7.7, blast: 7 };
 
   // Whitespace-packed furniture registers first for the feature-label placer.
   const furnitureBoxes = [furniture.comm, furniture.fieldElev, furniture.magVar, furniture.caution, furniture.pcn, furniture.notes, furniture.ramp, furniture.lighting, furniture.hotspotTable, furniture.legend].filter((box): box is Placement => Boolean(box));
@@ -1376,16 +1381,16 @@ export function render(model: SiteModel): string {
     `<title id="chart-title">${esc(model.identity.airportName)} airport diagram</title><desc id="chart-desc">Procedurally generated fictional FAA-style airport diagram for ${esc(model.identity.city)}, ${esc(model.identity.state)}.</desc>` +
     `<metadata>${esc(JSON.stringify(metadata))}</metadata><defs><style>` +
     `text{font-family:Futura,"Avenir Next",Avenir,"Century Gothic",sans-serif;fill:${BLACK};font-weight:500;letter-spacing:.06em}` +
-    `.title{font-size:17px}.margin{font-size:10px}.small{font-size:8px}.micro{font-size:6.5px}`+
+    `.title{font-size:22px}.margin{font-size:10.5px}.small{font-size:8.5px}.micro{font-size:7px}`+
     // The side effectivity band is set in a grotesque on real sheets, not in the
     // chart's Futura — it is production furniture rather than chart content.
     `.effectivity{font-size:6.5px;font-family:Helvetica,Arial,"Helvetica Neue",sans-serif;letter-spacing:.02em}` +
-    `.runway-end{font-weight:700}.hdg{font-size:7.5px}.dims{font-size:8px}.elev{font-size:7px}.twy{font-size:7px}.minor{font-size:7px}.blast{font-size:6.5px}` +
+    `.runway-end{font-weight:700}.hdg{font-size:8px}.dims{font-size:8.6px}.elev{font-size:7.6px}.twy{font-size:7.8px}.minor{font-size:7.7px}.blast{font-size:7px}` +
     `.hdg,.dims,.elev,.twy,.minor,.blast{letter-spacing:.04em}` +
     `.thin{stroke:${BLACK};stroke-width:.52;fill:none}.grat{stroke:${BLACK};stroke-width:.4;fill:none}.halo{paint-order:stroke;stroke:${WHITE};stroke-width:2.1px;stroke-linejoin:round}` +
     `.centerlights{fill:none;stroke:${WHITE};stroke-width:.85;stroke-dasharray:.9 3.6;stroke-linecap:butt}` +
     `.dotted{stroke:${BLACK};stroke-width:.52;stroke-dasharray:.6 2.2;stroke-linecap:round}` +
-    `.hotspot{stroke-width:1.2}.hot-text{font-size:7px;letter-spacing:.03em}.underline{text-decoration:underline}` +
+    `.hotspot{stroke-width:1.2}.hot-text{font-size:7.6px;letter-spacing:.03em}.underline{text-decoration:underline}` +
     `</style><clipPath id="plot-clip"><rect x="${FRAME.x + 1}" y="${FRAME.y + 1}" width="${FRAME.w - 2}" height="${FRAME.h - 2}"/></clipPath></defs>` +
     `<rect width="${W}" height="${H}" fill="${WHITE}"/>${margins(model)}<rect x="${FRAME.x}" y="${FRAME.y}" width="${FRAME.w}" height="${FRAME.h}" fill="none" stroke="${BLACK}" stroke-width="1.04"/>` +
     `<g clip-path="url(#plot-clip)">${graticuleInk}${pavement(model, projection)}${runwayInk}${holdInk}${buildingInk}${featureInk}${taxiwayInk}${comm}${fieldElev}${magvar}${bottom}${hotspotInk}</g></svg>`;
