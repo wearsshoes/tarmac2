@@ -354,7 +354,10 @@ function graticule(model: SiteModel, projection: Projection, placer: LabelPlacer
   const spanMinutes = PLOT.h / projection.distance(FEET_PER_MINUTE);
   const step = [0.25, 0.5, 1, 2, 5].find((s) => spanMinutes / s <= 5) ?? 5;
   let out = `<g id="graticule" class="grat">`;
-  const clamp = { x0: PLOT.x, x1: PLOT.x + PLOT.w, y0: PLOT.y, y1: PLOT.y + PLOT.h };
+  // Graticule runs to the neatline, not to the inset plot box: on a real sheet
+  // the ticked lat/lon lines meet the frame. PLOT still governs where the
+  // airfield is drawn and where labels may sit.
+  const clamp = { x0: FRAME.x, x1: FRAME.x + FRAME.w, y0: FRAME.y, y1: FRAME.y + FRAME.h };
   const lonScale = Math.max(0.2, Math.cos((lat * Math.PI) / 180));
 
   const drawLine = (isLat: boolean, minuteValue: number): string => {
@@ -420,10 +423,37 @@ function pavement(model: SiteModel, projection: Projection): string {
   const tdgScale = { "2A": 0.85, "3": 1, "4": 1.15, "5": 1.3 }[model.design.tdg];
   for (const taxiway of model.taxiways) {
     const radius = Math.max(1.4, projection.distance(taxiway.width) * 0.62 * tdgScale);
-    // Fillet patches at interior bends and at junction endpoints.
-    for (const p of taxiway.points.slice(1)) {
-      const q = projection.point(p);
-      out += `<circle cx="${num(q.x)}" cy="${num(q.y)}" r="${num(radius)}"/>`;
+    // Fillets belong at real bends, on the inside of the turn. Stamping a disc
+    // at every vertex put visible beads along straight runs — a polyline vertex
+    // is not a junction — and a disc is the wrong shape regardless: pavement
+    // fills the inside of a corner, it does not bulge symmetrically around it.
+    const projected = taxiway.points.map((p) => projection.point(p));
+    for (let i = 1; i + 1 < projected.length; i++) {
+      const prev = projected[i - 1]!;
+      const cur = projected[i]!;
+      const next = projected[i + 1]!;
+      const inLen = Math.hypot(cur.x - prev.x, cur.y - prev.y) || 1;
+      const outLen = Math.hypot(next.x - cur.x, next.y - cur.y) || 1;
+      const inDir = { x: (cur.x - prev.x) / inLen, y: (cur.y - prev.y) / inLen };
+      const outDir = { x: (next.x - cur.x) / outLen, y: (next.y - cur.y) / outLen };
+      const cross = inDir.x * outDir.y - inDir.y * outDir.x;
+      const dot = inDir.x * outDir.x + inDir.y * outDir.y;
+      const turn = Math.abs(Math.atan2(cross, dot));
+      // Below ~8° the join is visually straight and needs no pavement at all.
+      if (turn < 0.14) continue;
+      // Inside of the turn is the side the path bends toward.
+      const sign = cross > 0 ? 1 : -1;
+      const half = Math.max(1.2, projection.distance(taxiway.width) / 2);
+      const reach = radius * (0.7 + turn);
+      const a = { x: cur.x - inDir.x * reach + -inDir.y * sign * half, y: cur.y - inDir.y * reach + inDir.x * sign * half };
+      const b = { x: cur.x + outDir.x * reach + -outDir.y * sign * half, y: cur.y + outDir.y * reach + outDir.x * sign * half };
+      // Quadratic through the corner: the arc a real fillet cuts.
+      out += `<path d="M${num(a.x)} ${num(a.y)}Q${num(cur.x)} ${num(cur.y)} ${num(b.x)} ${num(b.y)}L${num(cur.x)} ${num(cur.y)}Z"/>`;
+    }
+    // The far endpoint is a genuine junction with whatever it meets.
+    if (projected.length > 1) {
+      const end = projected[projected.length - 1]!;
+      out += `<circle cx="${num(end.x)}" cy="${num(end.y)}" r="${num(radius * 0.8)}"/>`;
     }
     // Flared throat where a connector meets its runway (first point sits on the CL).
     if ((taxiway.kind === "connector" || taxiway.kind === "exit") && taxiway.runwayId) {
@@ -749,6 +779,10 @@ function taxiwayLabels(model: SiteModel, projection: Projection, placer: LabelPl
         // The identifier sets along the local tangent at its own station.
         const angle = fold((Math.atan2(after.y - before.y, after.x - before.x) * 180) / Math.PI);
         const anchor = projection.point(pointOnPolyline(taxiway.points, t));
+        // On the ribbon first: a taxiway identifier belongs on its taxiway, and
+        // the gray gives the letter its own contrast without a halo. Offsets
+        // remain as fallbacks for when the centreline station is truly blocked.
+        candidates.push({ point: anchor, angle });
         for (const side of [preferredSide, -preferredSide]) for (const distance of [5.5, 9, 13, 18, 24, 30, 36, 42]) {
           candidates.push({ point: { x: anchor.x + normal.x * side * distance, y: anchor.y + normal.y * side * distance }, angle });
         }
@@ -757,7 +791,7 @@ function taxiwayLabels(model: SiteModel, projection: Projection, placer: LabelPl
     };
     const label = (candidate: Candidate, size: number): string =>
       text(candidate.point.x, candidate.point.y, taxiway.name,
-        `class="twy halo" text-anchor="middle" transform="rotate(${num(candidate.angle)} ${num(candidate.point.x)} ${num(candidate.point.y)})" font-size="${num(size)}"`);
+        `class="twy" text-anchor="middle" transform="rotate(${num(candidate.angle)} ${num(candidate.point.x)} ${num(candidate.point.y)})" font-size="${num(size)}"`);
     for (let i = 0; i < count; i++) {
       const t = count === 1 ? 0.5 : (0.6 * spacing + i * ((pathLength - 1.2 * spacing) / Math.max(1, count - 1))) / pathLength;
       const side = (i + twyIndex) % 2 === 0 ? 1 : -1;
@@ -1153,11 +1187,15 @@ function fieldElevBox(model: SiteModel, placement: Placement, projection: Projec
     const fromY = fromX === placement.x || fromX === placement.x + placement.w
       ? placement.y + 10
       : dot.y < placement.y ? placement.y : placement.y + 21;
-    // The leader draws beneath later labels and reserves nothing: it may cross the
-    // airfield to reach the high point, exactly like the published charts.
-    const points = placer.leaderPath({ x: fromX, y: fromY }, dot);
-    out += `<path d="${points.map((point, index) => `${index ? "L" : "M"}${num(point.x)} ${num(point.y)}`).join("")}" class="thin"/>`;
-    out += `<circle cx="${num(dot.x)}" cy="${num(dot.y)}" r="1.7" fill="${BLACK}" stroke="${WHITE}" stroke-width=".8"/>`;
+    // A leader that crosses most of the sheet does more harm than the elevation
+    // dot does good, so past roughly a third of the page the box simply stands
+    // alone — the label still reads, it just stops pointing.
+    const reach = Math.hypot(dot.x - fromX, dot.y - fromY);
+    if (reach < W * 0.36) {
+      const points = placer.leaderPath({ x: fromX, y: fromY }, dot);
+      out += `<path d="${points.map((point, index) => `${index ? "L" : "M"}${num(point.x)} ${num(point.y)}`).join("")}" class="thin"/>`;
+      out += `<circle cx="${num(dot.x)}" cy="${num(dot.y)}" r="1.7" fill="${BLACK}" stroke="${WHITE}" stroke-width=".8"/>`;
+    }
   }
   return `${out}</g>`;
 }
@@ -1283,8 +1321,8 @@ function margins(model: SiteModel): string {
     text(860, 28, right, `class="margin" text-anchor="end"`) + text(860, 42, city, `class="small" text-anchor="end"`) +
     text(40, 1163, "AIRPORT DIAGRAM", `class="title"`) + text(40, 1178, model.chartNumber, `class="micro"`) +
     text(860, 1163, city, `class="small" text-anchor="end"`) + text(860, 1178, right, `class="margin" text-anchor="end"`) +
-    text(17, H / 2, model.cycle, `class="micro" text-anchor="middle" transform="rotate(-90 17 ${H / 2})"`) +
-    text(883, H / 2, model.cycle, `class="micro" text-anchor="middle" transform="rotate(90 883 ${H / 2})"`) + `</g>`;
+    text(17, H / 2, model.cycle, `class="effectivity" text-anchor="middle" transform="rotate(-90 17 ${H / 2})"`) +
+    text(883, H / 2, model.cycle, `class="effectivity" text-anchor="middle" transform="rotate(90 883 ${H / 2})"`) + `</g>`;
 }
 
 export function render(model: SiteModel): string {
@@ -1338,7 +1376,10 @@ export function render(model: SiteModel): string {
     `<title id="chart-title">${esc(model.identity.airportName)} airport diagram</title><desc id="chart-desc">Procedurally generated fictional FAA-style airport diagram for ${esc(model.identity.city)}, ${esc(model.identity.state)}.</desc>` +
     `<metadata>${esc(JSON.stringify(metadata))}</metadata><defs><style>` +
     `text{font-family:Futura,"Avenir Next",Avenir,"Century Gothic",sans-serif;fill:${BLACK};font-weight:500;letter-spacing:.06em}` +
-    `.title{font-size:17px}.margin{font-size:10px}.small{font-size:8px}.micro{font-size:6.5px}` +
+    `.title{font-size:17px}.margin{font-size:10px}.small{font-size:8px}.micro{font-size:6.5px}`+
+    // The side effectivity band is set in a grotesque on real sheets, not in the
+    // chart's Futura — it is production furniture rather than chart content.
+    `.effectivity{font-size:6.5px;font-family:Helvetica,Arial,"Helvetica Neue",sans-serif;letter-spacing:.02em}` +
     `.runway-end{font-weight:700}.hdg{font-size:7.5px}.dims{font-size:8px}.elev{font-size:7px}.twy{font-size:7px}.minor{font-size:7px}.blast{font-size:6.5px}` +
     `.hdg,.dims,.elev,.twy,.minor,.blast{letter-spacing:.04em}` +
     `.thin{stroke:${BLACK};stroke-width:.52;fill:none}.grat{stroke:${BLACK};stroke-width:.4;fill:none}.halo{paint-order:stroke;stroke:${WHITE};stroke-width:2.1px;stroke-linejoin:round}` +

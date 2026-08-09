@@ -170,12 +170,18 @@ describe("chart conventions", () => {
     expect(standalone).toBeGreaterThan(0);
   });
 
-  test("FIELD ELEV box carries a dot + leader to the runway high point", () => {
-    for (const seed of ["fe-1", "fe-2", "chart-conventions"]) {
+  test("FIELD ELEV box carries a dot + leader, or neither when the reach is too far", () => {
+    // A leader crossing most of the sheet is worse than no leader, so the box
+    // may stand alone — but the dot and its leader are one unit: a dot with no
+    // leader points at nothing, a leader with no dot ends nowhere.
+    let withLeader = 0;
+    for (const seed of ["fe-1", "fe-2", "chart-conventions", "fe-3", "fe-4", "fe-5"]) {
       const group = groupContent(render(generate(seed)), "field-elevation")!;
-      expect(group).toContain("<circle");
-      expect(group).toContain("<path");
+      expect(group).toContain("FIELD ELEV");
+      expect(group.includes("<circle")).toBe(group.includes("<path"));
+      if (group.includes("<circle")) withLeader++;
     }
+    expect(withLeader).toBeGreaterThan(0);
   });
 
   test("closed runways carry the closed-runway caution", () => {

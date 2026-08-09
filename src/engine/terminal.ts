@@ -635,19 +635,23 @@ export function buildTerminal(rng: RNG, role: Role, archetypePrior: TerminalArch
       reach = blockDepth / 2 + armLength;
       halfWidth = blockLength / 2 + 200;
     } else {
-      // Satellite: a processor with a detached pod reached by a link.
-      const processorLength = dimsRng.float(700, 1050);
+      // Satellite: a processor with a detached pod reached by a link. The
+      // processor grows with the programme too — a big satellite hanging off a
+      // fixed-size stub was what made these read as all pod and no terminal.
+      const processorLength = Math.max(700, Math.min(1600, gates * 16 * dimsRng.float(0.9, 1.15)));
       const processorDepth = processorDepthFor(dimsRng.float(220, 320));
       const gap = dimsRng.float(650, 1000);
       const podClass: AircraftClass = role === "mega-hub" ? "wide" : "narrow";
-      // Sized from its own gate demand: the pod is an octagon, so each of its 8
-      // faces runs about 0.45 of the width, and a face shorter than one stand
-      // pitch parks nothing at all. A fixed 320-480 ft pod silently produced
-      // zero stands for wide-body pods (pitch 230 ft).
-      const podSize = Math.max(
-        PITCH[podClass] * 2.6,
-        (gates * PITCH[podClass]) / (8 * 0.45) * dimsRng.float(1, 1.15),
-      );
+      // Sized from gate demand, but bounded: the pod is an octagon whose 8 faces
+      // each run about 0.45 of its width, so a face shorter than one stand pitch
+      // parks nothing (a fixed 320-480 ft pod silently produced zero stands for
+      // wide-body pods at 230 ft pitch). Demand alone runs away though — 68
+      // gates asked for a 5,100 ft pod against an 850 ft processor, six times
+      // its parent and wider than the runways. A satellite is a remote pier,
+      // not a second airport: it stays within about 1.6x its processor, and
+      // gates beyond that capacity are simply not served here.
+      const demandSize = (gates * PITCH[podClass]) / (8 * 0.45) * dimsRng.float(1, 1.15);
+      const podSize = Math.max(PITCH[podClass] * 2.6, Math.min(demandSize, processorLength * 1.6, 1100));
       for (let i = 0; i < ops; i++) {
         accretion.push({ op: "detach-satellite", componentId: `comp-pod-${index}`, cause: cause() });
       }
