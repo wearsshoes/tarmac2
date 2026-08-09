@@ -653,7 +653,10 @@ export function buildTerminal(rng: RNG, role: Role, archetypePrior: TerminalArch
             { u: armU + 65, v: blockDepth / 2 + armLength }, { u: armU - 65, v: blockDepth / 2 + armLength },
           ]),
           { u: armU, v: blockDepth / 2 },
-          side * dimsRng.float(0.15, 0.45),
+          // Negative: rotateAbout is CCW-positive in (u, v), so the right arm
+          // (side +1) needs a negative angle to splay away from the centreline.
+          // Both arms were leaning inward, closing the ramp they should embrace.
+          -side * dimsRng.float(0.15, 0.45),
         );
         comps.push(makeComp(`comp-arm-${index}-${side > 0 ? "r" : "l"}`, unitId, "pier", "attached", place(arm), pierRule(gateClass), armName, "concourse", true, side < 0));
       }

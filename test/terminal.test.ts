@@ -145,6 +145,49 @@ describe("terminal rebuild contract (Phase 3)", () => {
     expect(median).toBeGreaterThanOrEqual(8);
   });
 
+  test("block terminal arms splay outward, never inward", () => {
+    // rotateAbout is CCW-positive in the (u, v) frame, so the arm rotation sign
+    // is easy to get backwards — and backwards means the two concourses lean in
+    // and close off the ramp they are supposed to embrace.
+    let outward = 0;
+    let inward = 0;
+    for (let i = 0; i < 120; i++) {
+      const model = generate(`arm-splay-${i}`);
+      if (!model.terminal) continue;
+      for (const unit of model.terminal.units) {
+        if (unit.form !== "block") continue;
+        const processor = model.terminal.components.find((c) => c.unitId === unit.id && c.kind === "processor");
+        if (!processor) continue;
+        const cx = processor.polygon.reduce((s, p) => s + p.x, 0) / processor.polygon.length;
+        const cy = processor.polygon.reduce((s, p) => s + p.y, 0) / processor.polygon.length;
+        // Long axis of the processor via PCA gives the unit's own frame.
+        let sxx = 0;
+        let syy = 0;
+        let sxy = 0;
+        for (const p of processor.polygon) {
+          sxx += (p.x - cx) ** 2;
+          syy += (p.y - cy) ** 2;
+          sxy += (p.x - cx) * (p.y - cy);
+        }
+        const theta = 0.5 * Math.atan2(2 * sxy, sxx - syy);
+        const ax = { x: Math.cos(theta), y: Math.sin(theta) };
+        for (const arm of model.terminal.components.filter((c) => c.unitId === unit.id && c.id.includes("-arm-"))) {
+          const local = arm.polygon.map((p) => ({
+            u: (p.x - cx) * ax.x + (p.y - cy) * ax.y,
+            v: -(p.x - cx) * ax.y + (p.y - cy) * ax.x,
+          }));
+          const byDepth = [...local].sort((a, b) => Math.abs(a.v) - Math.abs(b.v));
+          const rootU = (byDepth[0]!.u + byDepth[1]!.u) / 2;
+          const tipU = (byDepth[byDepth.length - 1]!.u + byDepth[byDepth.length - 2]!.u) / 2;
+          if (Math.abs(tipU) - Math.abs(rootU) > 15) outward++;
+          else if (Math.abs(tipU) - Math.abs(rootU) < -15) inward++;
+        }
+      }
+    }
+    expect(outward).toBeGreaterThan(10);
+    expect(inward).toBe(0);
+  });
+
   test("every silhouette irregularity cites a recorded accretion operation", () => {
     for (const fixture of terminalFixtures) {
       const model = generate(fixture.seed, fixture.options);
