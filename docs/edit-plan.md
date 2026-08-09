@@ -32,11 +32,17 @@ changes.
 3. **Terminal rebuild keeps the pipeline inversion, cuts the planning consultancy.**
    Keep: terminal/concourse hierarchy with stable IDs, edge roles on building faces,
    stands and taxilanes generated *before* the apron polygon (the boundary is derived
-   from operations, not a bounding rectangle with steps). Cut: generated landside road
-   networks (a reserved non-apron **landside court** polygon does that job), drainage/
-   utility/fence/emergency systems, multi-criterion site scoring (simple placement
-   rules suffice), and the remote/transporter family. Phased growth is reduced to a
-   short vocabulary of 2–4 accretion operations with recorded causes.
+   from operations, not a bounding rectangle with steps). Two causes are promoted to
+   real drivers because they are directly visible: **road courts** for unit/
+   curvilinear systems (special-case loop/spine geometry that spaces the units) and
+   **landside envelope numbers** (curb/parking depth bounding processor size and unit
+   spacing). Cut: generated landside road networks (a reserved non-apron **landside
+   court** polygon does that job elsewhere), drainage/utility/fence/emergency systems,
+   multi-criterion site scoring (simple placement rules suffice), demand simulation as
+   master input, and the remote/transporter family. Phased growth is reduced to a
+   short vocabulary of 2–4 accretion operations with recorded causes, with a recorded
+   contingency to demand-sequence them if hub contact sheets read too tidy. This is
+   the "bounding level 2.5" ruling detailed in `terminal-generator-plan.md`.
 4. **No polygon-boolean geometry foundation.** FAA pavement is one flat #CFCFCF with
    no outlines, so overlapping ribbons + fillet patches are visually identical to a
    union. The existing ribbon/fillet approach stays; invest in *topology* (what
@@ -188,9 +194,10 @@ is the detailed reference; its stage list matches the cuts recorded above.
 1. **Hierarchy and program:** typed terminal → concourse/satellite components with
    parent IDs and stable identity; gate-count ranges by role; archetype chosen from
    program + site frame with role supplying priors, not the whole answer.
-2. **Edge roles:** every exposed building face classified (gate-face, landside-curb,
-   connector, expansion-end, service); the landside court is a reserved non-apron
-   polygon.
+2. **Edge roles and landside:** every exposed building face classified (gate-face,
+   landside-curb, connector, expansion-end, service); the landside court is a reserved
+   non-apron polygon; landside envelope numbers bound processor depth and unit
+   spacing; unit/curvilinear families get explicit road-court geometry.
 3. **Operations before outline:** stands on gate faces → taxilanes/alleys →
    collectors → flared throats onto named taxiways; the apron polygon is derived from
    those operations plus purposeful residuals. Delete `steppedEdge` and the

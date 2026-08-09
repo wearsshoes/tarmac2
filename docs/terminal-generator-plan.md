@@ -1,4 +1,4 @@
-# Terminal generator plan (revision 2)
+# Terminal generator plan (revision 2.5)
 
 ## Objective
 
@@ -14,15 +14,33 @@ building silhouettes and gray pavement read like the real FAA diagrams cataloged
 `apron-and-paved-surface-design.md` defines the observable pavement contract. This
 document defines the implementation decomposition for `edit-plan.md` Phase 3.
 
-## Scope cuts (this revision)
+## Bounding level and scope cuts (this revision)
 
-Recorded in `edit-plan.md` "Decisions and cuts"; repeated here because this file is the
-detailed reference:
+The chosen bounding level ("2.5"): geometry causes are **sampled, then recorded** —
+except for the few causes with directly visible geometric consequences, which are
+promoted to actual drivers:
+
+1. **Road courts for unit and curvilinear systems.** These families get an explicit
+   court: a loop/spine reservation that positions and spaces the terminal units, drawn
+   or left as shaped negative space. This is special-case geometry, not a road
+   network — it is what JFK/DFW-style layouts derive their look from.
+2. **Landside envelope as a sizing constraint.** Curb length and parking/garage depth
+   are numbers that bound processor depth and unit spacing. Nothing extra is drawn;
+   proportions change.
+3. **Contingent (decide at contact-sheet review):** if hub sheets still read too tidy,
+   upgrade random accretion to **demand-sequenced accretion** — a short era trajectory
+   (gate demand at 3–4 timestamps) selects the operations, so a grown-looking hub is
+   grown everywhere. Do not build this pre-emptively.
+
+Cuts, recorded in `edit-plan.md` "Decisions and cuts" and repeated here because this
+file is the detailed reference:
 
 - **No generated landside road network.** Each terminal unit reserves a **landside
   court** polygon (curb/parking side, oriented by the site's landside approach
-  direction) that is never aircraft apron. That reservation is the whole landside
-  system for this pass.
+  direction) that is never aircraft apron; unit/curvilinear courts above are the only
+  road-shaped geometry.
+- **No demand simulation as master input.** Gate programs are drawn from role ranges;
+  the demand trajectory exists only if the accretion contingency above is exercised.
 - **No drainage, utility, fence, or emergency-route modeling.**
 - **No multi-criterion site scoring.** Terminal district placement keeps the existing
   quadrant/clearance machinery with two added rules: minimum taxi distance to the
@@ -30,6 +48,8 @@ detailed reference:
 - **No remote/transporter family.** Retained families: linear, pier, satellite,
   parallel/midfield, unit, curvilinear — plus hybrids arising from accretion.
 - **Phased growth is 2–4 accretion operations**, not a full phase-history system.
+- **Connector type (bridge/tunnel/at-grade) remains a recorded draw**, not a
+  walking-distance rule; revisit only if satellites look wrong.
 
 ## What is wrong with the current pipeline
 
@@ -102,6 +122,11 @@ runway bank layout and parcel edge. Placement uses the existing district machine
 the two added rules above. Multi-unit systems (unit/horseshoe) get per-unit frames —
 do not assume one global airside direction.
 
+The frame carries the **landside envelope numbers** (curb length, parking/garage
+depth) that bound processor depth and unit spacing in stage 5. For unit and
+curvilinear families, generate the **road court** here: a loop/spine reservation whose
+geometry positions the units and shapes the landside negative space.
+
 ### 4. Morphology family
 
 Choose from the retained families using a compatibility check (program size vs.
@@ -134,6 +159,11 @@ satellite with a connector; add a unit terminal. Each records its cause. Re-vali
 stands and taxilanes after each operation. This is where earned irregularity and
 hybrid families come from.
 
+If contact-sheet review finds hub silhouettes too tidy, exercise the recorded
+contingency: derive the operation sequence from a short era/demand trajectory instead
+of independent draws (bounding level note above). The operation vocabulary is
+unchanged either way.
+
 ### 8. Neighboring districts
 
 Cargo, GA, RON, and deice aprons reuse the stand-row + taxilane vocabulary at reduced
@@ -153,13 +183,16 @@ departure routes (hubs only). Fire/fuel/military keep their existing grammar.
 
 1. Hierarchy/program types; generate semantic programs while adapting current polygons
    (no visual change).
-2. Site frames with airside/landside directions; landside court reservation.
+2. Site frames with airside/landside directions, landside envelope numbers, and the
+   landside court reservation.
 3. Component graph + edge roles + stands for **linear and pier**; derived apron
    replaces the rectangular apron for those fixtures.
-4. Remaining families (satellite, midfield/parallel, unit, curvilinear).
-5. Accretion operations and hybrid fixtures.
-6. District aprons (cargo/GA/RON/deice) on the stand-row vocabulary.
-7. Delete `steppedEdge`, the bounding-rectangle apron, and compatibility fields.
+4. Satellite and midfield/parallel families.
+5. Unit and curvilinear families **with road-court geometry**.
+6. Accretion operations and hybrid fixtures (assess the demand-sequencing contingency
+   at this slice's contact-sheet review).
+7. District aprons (cargo/GA/RON/deice) on the stand-row vocabulary.
+8. Delete `steppedEdge`, the bounding-rectangle apron, and compatibility fields.
 
 Each slice lands with its fixtures and tests per `test-suite-spec.md`.
 
@@ -172,6 +205,7 @@ Each slice lands with its fixtures and tests per `test-suite-spec.md`.
 | Circulation | Every stand reaches a taxilane, collector, throat, and named taxiway. |
 | Detached components | Every satellite declares its connector type, drawn or not. |
 | Apron shape | Boundaries follow edge roles and routes — never the building bounding box or repeated fixed-width steps. |
+| Landside proportion | Processor depth and unit spacing respect the landside envelope numbers; unit/curvilinear courts read as designed negative space. |
 | Accretion | Every irregularity traces to a recorded operation. |
 | Family fidelity | The six families remain recognizably different on the contact sheet; hybrids arise from accretion. |
 
