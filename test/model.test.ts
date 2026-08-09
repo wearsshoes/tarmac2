@@ -104,14 +104,25 @@ describe("runway and taxiway invariants", () => {
     }
   });
 
-  test("mega-hub banks renumber in chunks (LAX/ATL pattern)", () => {
-    const model = generate("chunk-check", { role: "mega-hub" });
-    const bank = model.runways.filter((r) => r.lifecycle === "active");
-    expect(bank.length).toBe(4);
-    const numbers = new Set(bank.map((r) => Number.parseInt(r.ends[0].designator, 10)));
-    expect(numbers.size).toBe(2);
-    const [low, high] = [...numbers].sort((a, b) => a - b);
-    expect((low! % 36) + 1).toBe(high!);
+  test("mega-hub banks renumber in group chunks; four-plus active runways", () => {
+    for (const seed of ["chunk-check", "chunk-check-2", "chunk-check-3"]) {
+      const model = generate(seed, { role: "mega-hub" });
+      const primaryHeading = Math.round(model.windHeading);
+      const bank = model.runways.filter((r) => r.lifecycle === "active" && Math.round(r.heading) === primaryHeading);
+      expect(bank.length).toBeGreaterThanOrEqual(4);
+      // Runway numbers form a short consecutive run (one per bank group), and
+      // suffixes pair correctly across ends.
+      const numbers = [...new Set(bank.map((r) => Number.parseInt(r.ends[0].designator, 10)))].sort((a, b) => a - b);
+      expect(numbers.length).toBeGreaterThanOrEqual(2);
+      expect(numbers.length).toBeLessThanOrEqual(4);
+      expect(numbers[numbers.length - 1]! - numbers[0]!).toBe(numbers.length - 1);
+      for (const runway of bank) {
+        const [a, b] = [runway.ends[0].designator.slice(-1), runway.ends[1].designator.slice(-1)];
+        if (a === "L") expect(b).toBe("R");
+        if (a === "R") expect(b).toBe("L");
+        if (a === "C") expect(b).toBe("C");
+      }
+    }
   });
 });
 

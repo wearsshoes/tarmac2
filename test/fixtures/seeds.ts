@@ -56,8 +56,8 @@ export const fixtures: Fixture[] = [
     name: "role-mega-hub",
     seed: "fixture-mega-hub",
     options: { role: "mega-hub" },
-    why: "largest role; four runways in two heading families; dense sheet",
-    summary: { role: "mega-hub", archetype: "satellite", openRunways: 4, closedRunways: 0, headingFamilies: 2 },
+    why: "largest role; five runways in two heading families; dense sheet",
+    summary: { role: "mega-hub", archetype: "satellite", openRunways: 5, closedRunways: 0, headingFamilies: 2 },
   },
 
   // --- one per archetype (forced via options) ---

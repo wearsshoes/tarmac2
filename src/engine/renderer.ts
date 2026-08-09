@@ -68,6 +68,9 @@ interface FurniturePlan {
   pcn: Placement;
   notes?: Placement;
   ramp?: Placement;
+  lighting?: Placement;
+  hotspotTable?: Placement;
+  legend?: Placement;
   forced: number;
 }
 
@@ -561,7 +564,7 @@ function runwayShape(runway: Runway, index: number, projection: Projection, plac
       const bed = rect(add(endpoint, vscale(outward, 40 + end.emas / 2)), runway.width + 20, end.emas, -runway.heading);
       out += `<polygon points="${projection.polygon(bed)}" fill="${WHITE}" class="thin"/>`;
       const labelPoint = projection.point(add(endpoint, vscale(outward, end.emas + 180)));
-      const candidates = RING.map((candidate) => ({ x: candidate.x * 0.8, y: candidate.y * 0.8 }));
+      const candidates = [0.8, 1.5, 2.3].flatMap((factor) => RING.map((candidate) => ({ x: candidate.x * factor, y: candidate.y * factor })));
       const anchor = placer.try(labelPoint, "EMAS", fonts.blast, candidates)?.point ?? placer.forceBest(labelPoint, "EMAS", fonts.blast, candidates);
       out += text(anchor.x, anchor.y, "EMAS", `class="blast halo" text-anchor="middle"`);
     }
@@ -584,6 +587,46 @@ function runwayShape(runway: Runway, index: number, projection: Projection, plac
       const tail = projection.point(add(endpoint, vscale(inward, (k / arrows) * end.displaced + end.displaced * 0.08 / arrows)));
       const head = projection.point(add(endpoint, vscale(inward, ((k + 0.86) / arrows) * end.displaced)));
       out += `<path d="M${num(tail.x)} ${num(tail.y)}L${num(head.x)} ${num(head.y)}M${num(head.x - dIn.x * 2.4 + sIn.x * 1.8)} ${num(head.y - dIn.y * 2.4 + sIn.y * 1.8)}L${num(head.x)} ${num(head.y)}L${num(head.x - dIn.x * 2.4 - sIn.x * 1.8)} ${num(head.y - dIn.y * 2.4 - sIn.y * 1.8)}" fill="none" stroke="${WHITE}" stroke-width=".7"/>`;
+    }
+  });
+
+  // Approach-light miniatures + circled system letter, and VGSI dots on the
+  // recorded side (Appendix 2 families, Phase 4).
+  runway.ends.forEach((end, endIndex) => {
+    const endpoint = endIndex === 0 ? a : b;
+    const opposite = endIndex === 0 ? b : a;
+    const inward = { x: (opposite.x - endpoint.x) / runway.length, y: (opposite.y - endpoint.y) / runway.length };
+    const dIn = projection.direction(inward);
+    const dOut = { x: -dIn.x, y: -dIn.y };
+    if (end.approachLights) {
+      const len = Math.max(10, Math.min(22, projection.distance(2400)));
+      const base = projection.point(endpoint);
+      const tip = { x: base.x + dOut.x * len, y: base.y + dOut.y * len };
+      const sIn = { x: -dIn.y, y: dIn.x };
+      out += `<path d="M${num(base.x)} ${num(base.y)}L${num(tip.x)} ${num(tip.y)}" class="thin"/>`;
+      for (let k = 1; k <= 4; k++) {
+        const c = { x: base.x + dOut.x * (len * k) / 5, y: base.y + dOut.y * (len * k) / 5 };
+        const w = 2.4 - k * 0.3;
+        out += `<path d="M${num(c.x - sIn.x * w)} ${num(c.y - sIn.y * w)}L${num(c.x + sIn.x * w)} ${num(c.y + sIn.y * w)}" class="thin"/>`;
+      }
+      const letter = { "ALSF-2": "A", SSALR: "S", MALSR: "M", ODALS: "O" }[end.approachLights];
+      const cx = tip.x + dOut.x * 4.6;
+      const cy = tip.y + dOut.y * 4.6;
+      out += `<circle cx="${num(cx)}" cy="${num(cy)}" r="3.4" fill="${WHITE}" class="thin"/>`;
+      out += text(cx, cy + 2, letter!, `class="blast" text-anchor="middle" font-size="5.4"`);
+      placer.reserve({ x: Math.min(base.x, cx) - 4, y: Math.min(base.y, cy) - 4, w: Math.abs(cx - base.x) + 8, h: Math.abs(cy - base.y) + 8 });
+    }
+    if (end.vgsi) {
+      // Side is as seen on final approach: left of the inward direction.
+      const left = { x: dIn.y, y: -dIn.x };
+      const sideDir = end.vgsi.side === "L" ? left : { x: -left.x, y: -left.y };
+      const station = projection.point(add(endpoint, vscale(inward, 1000)));
+      const offset = halfWidthPage + 3.4;
+      const count = end.vgsi.kind === "PAPI" ? 4 : 2;
+      for (let k = 0; k < count; k++) {
+        const c = { x: station.x + sideDir.x * (offset + k * 2) + dIn.x * 0, y: station.y + sideDir.y * (offset + k * 2) };
+        out += `<circle cx="${num(c.x)}" cy="${num(c.y)}" r=".8" fill="${BLACK}"/>`;
+      }
     }
   });
 
@@ -844,6 +887,63 @@ function buildingsLayer(model: SiteModel, projection: Projection, placer: LabelP
   return `${out}</g>`;
 }
 
+/** Located features (Phase 4): wind cone / segmented circle, helipads, and
+ * non-movement hatching along flagged apron edges. */
+function featureLayer(model: SiteModel, projection: Projection, placer: LabelPlacer): string {
+  let out = `<g id="located-features">`;
+
+  if (model.windCone) {
+    const p = projection.point(model.windCone.point);
+    out += `<g id="wind-cone">`;
+    out += `<circle cx="${num(p.x)}" cy="${num(p.y)}" r="1.5" fill="${BLACK}"/>`;
+    out += `<path d="M${num(p.x)} ${num(p.y)}v-6l4 1.6-4 1.6" fill="${BLACK}" class="thin"/>`;
+    if (model.windCone.segmentedCircle) {
+      out += `<circle cx="${num(p.x)}" cy="${num(p.y)}" r="8" fill="none" stroke="${BLACK}" stroke-width=".7" stroke-dasharray="2.4 2"/>`;
+    }
+    placer.reserve({ x: p.x - 9, y: p.y - 9, w: 18, h: 18 });
+    out += `</g>`;
+  }
+
+  for (const [i, pad] of model.helipads.entries()) {
+    const p = projection.point(pad);
+    out += `<g id="helipad-${i}"><circle cx="${num(p.x)}" cy="${num(p.y)}" r="4.6" fill="${WHITE}" class="thin"/>` +
+      text(p.x, p.y + 2.4, "H", `class="small" text-anchor="middle" font-weight="700"`) + `</g>`;
+    placer.reserve({ x: p.x - 6, y: p.y - 6, w: 12, h: 12 });
+  }
+
+  // Non-movement hatching: ticks along the flagged apron's building-side edge
+  // (the edge farthest from every active runway).
+  const activeSegs = model.runways.filter((r) => r.lifecycle === "active").map((r) => runwayEndpoints(r.center, r.heading, r.length));
+  for (const apronId of model.nonMovementApronIds) {
+    const apron = model.aprons.find((a) => a.id === apronId);
+    if (!apron) continue;
+    let best: { a: Point; b: Point; d: number } | null = null;
+    for (let i = 0; i < apron.polygon.length; i++) {
+      const a = apron.polygon[i]!;
+      const b = apron.polygon[(i + 1) % apron.polygon.length]!;
+      const mid = pointAlong(a, b, 0.5);
+      const d = Math.min(...activeSegs.map(([ra, rb]) => Math.hypot(mid.x - (ra.x + rb.x) / 2, mid.y - (ra.y + rb.y) / 2)));
+      if (!best || d > best.d) best = { a, b, d };
+    }
+    if (!best) continue;
+    const pa = projection.point(best.a);
+    const pb = projection.point(best.b);
+    const len = Math.hypot(pb.x - pa.x, pb.y - pa.y) || 1;
+    const dir = { x: (pb.x - pa.x) / len, y: (pb.y - pa.y) / len };
+    const normal = { x: -dir.y, y: dir.x };
+    let hatch = `<g id="non-movement-${esc(apron.id)}" class="thin">`;
+    hatch += `<path d="M${num(pa.x)} ${num(pa.y)}L${num(pb.x)} ${num(pb.y)}"/>`;
+    const ticks = Math.max(3, Math.floor(len / 6));
+    for (let k = 0; k <= ticks; k++) {
+      const c = { x: pa.x + dir.x * (len * k) / ticks, y: pa.y + dir.y * (len * k) / ticks };
+      hatch += `<path d="M${num(c.x)} ${num(c.y)}L${num(c.x + (dir.x + normal.x) * 2.2)} ${num(c.y + (dir.y + normal.y) * 2.2)}"/>`;
+    }
+    out += `${hatch}</g>`;
+  }
+
+  return `${out}</g>`;
+}
+
 function holdAndLahso(model: SiteModel, projection: Projection, placer: LabelPlacer, fonts: FontScale): string {
   let out = `<g id="hold-lines" class="thin">`;
   for (const hold of model.holdLines) {
@@ -936,7 +1036,9 @@ function furniturePlan(model: SiteModel, projection: Projection): FurniturePlan 
     `${frequency.value}${frequency.detail ? ` ${frequency.detail}` : ""}`,
   ]);
   const commW = Math.max(128, ...commLines.map((line) => textWidth(line, 8))) + 12;
-  const commH = Math.max(34, model.frequencies.length * 21 + 8);
+  // The boxed negative-D indicator hangs under the comm block when declared
+  // distances are published.
+  const commH = Math.max(34, model.frequencies.length * 21 + 8) + (model.declaredDistances ? 18 : 0);
   const comm = packer.place(commW, commH, ["top-left", "top-right", "center-left", "center-right"]);
 
   const cautionW = Math.min(430, Math.max(280, ...model.cautions.map((line) => textWidth(line, 8) + 14)));
@@ -958,6 +1060,18 @@ function furniturePlan(model: SiteModel, projection: Projection): FurniturePlan 
     ? packer.place(148, model.rampFrequencies.length * 10 + 22, ["bottom-right", "center-right", "bottom-left", "top-right"])
     : undefined;
 
+  const lighting = model.lightingNotes.length > 0
+    ? packer.place(Math.max(96, ...model.lightingNotes.map((line) => textWidth(line, 7) + 16)), model.lightingNotes.length * 10 + 12, ["center-right", "center-left", "bottom-right", "top-right", "bottom-left"])
+    : undefined;
+
+  const hotspotTable = model.hotspotTable && model.hotspots.length > 0
+    ? packer.place(Math.max(120, ...model.hotspots.map((h) => textWidth(`HS ${h.id}  ${h.reason}`, 7) + 14)), model.hotspots.length * 10 + 24, ["bottom-left", "bottom-right", "center-left", "center-right"])
+    : undefined;
+
+  const legend = model.nonMovementApronIds.length > 0
+    ? packer.place(132, 24, ["bottom-right", "bottom-left", "top-right", "center-right"])
+    : undefined;
+
   const fieldLabel = `FIELD ELEV ${model.identity.elevation}`;
   const fieldW = textWidth(fieldLabel, 8) + 14;
   const commOnLeft = comm.x + comm.w / 2 < W / 2;
@@ -965,7 +1079,7 @@ function furniturePlan(model: SiteModel, projection: Projection): FurniturePlan 
     ? ["top-right", "bottom-right", "center-right", "bottom-left"]
     : ["top-left", "bottom-left", "center-left", "bottom-right"]);
 
-  return { comm, fieldElev, magVar, caution, pcn, notes, ramp, forced: packer.forced };
+  return { comm, fieldElev, magVar, caution, pcn, notes, ramp, lighting, hotspotTable, legend, forced: packer.forced };
 }
 
 function commBlock(model: SiteModel, placement: Placement): string {
@@ -978,6 +1092,12 @@ function commBlock(model: SiteModel, placement: Placement): string {
     y += 10;
     out += text(x, y, `${freq.value}${freq.detail ? ` ${freq.detail}` : ""}`, `class="small halo"${rightAligned ? ` text-anchor="end"` : ""}`);
     y += 11;
+  }
+  // Boxed negative-D: declared-distance information is available elsewhere.
+  if (model.declaredDistances) {
+    const dx = rightAligned ? placement.x + placement.w - 17 : placement.x + 6;
+    out += `<g id="declared-distances"><rect x="${num(dx)}" y="${num(y - 4)}" width="11" height="11" fill="${BLACK}"/>` +
+      text(dx + 5.5, y + 4.5, "D", `class="small" text-anchor="middle" fill="${WHITE}" font-weight="700"`) + `</g>`;
   }
   return `${out}</g>`;
 }
@@ -1077,6 +1197,40 @@ function bottomBlocks(model: SiteModel, plan: FurniturePlan): string {
     }
     out += `</g>`;
   }
+
+  // Grouped runway-lighting notes in a boxed block ("HIRL ALL RWYS" grammar).
+  if (plan.lighting && model.lightingNotes.length > 0) {
+    const box = plan.lighting;
+    out += `<g id="lighting-block" data-layout-slot="${box.slot}"><rect x="${num(box.x)}" y="${num(box.y)}" width="${num(box.w)}" height="${num(box.h)}" fill="${WHITE}" class="thin"/>`;
+    model.lightingNotes.forEach((line, i) => {
+      out += text(box.x + box.w / 2, box.y + 10 + i * 10, line, `class="minor" text-anchor="middle"`);
+    });
+    out += `</g>`;
+  }
+
+  // Structured hot spot table surfacing the modeled reasons.
+  if (plan.hotspotTable && model.hotspotTable && model.hotspots.length > 0) {
+    const box = plan.hotspotTable;
+    out += `<g id="hotspot-table" data-layout-slot="${box.slot}"><rect x="${num(box.x)}" y="${num(box.y)}" width="${num(box.w)}" height="${num(box.h)}" fill="${WHITE}" class="thin"/>`;
+    out += text(box.x + 8, box.y + 12, "HOT SPOTS", `class="minor underline"`);
+    model.hotspots.forEach((hotspot, i) => {
+      out += text(box.x + 8, box.y + 24 + i * 10, `HS ${hotspot.id}`, `class="minor" fill="${BROWN}"`);
+      out += text(box.x + 34, box.y + 24 + i * 10, hotspot.reason, `class="minor"`);
+    });
+    out += `</g>`;
+  }
+
+  // Non-movement legend: a labeled sample of the hatching.
+  if (plan.legend && model.nonMovementApronIds.length > 0) {
+    const box = plan.legend;
+    out += `<g id="non-movement-legend" data-layout-slot="${box.slot}"><rect x="${num(box.x)}" y="${num(box.y)}" width="${num(box.w)}" height="${num(box.h)}" fill="${WHITE}" class="thin"/>`;
+    out += `<path d="M${num(box.x + 8)} ${num(box.y + 15)}h20" class="thin"/>`;
+    for (let k = 0; k < 5; k++) {
+      out += `<path d="M${num(box.x + 9 + k * 4.4)} ${num(box.y + 15)}l2.4 -2.6" class="thin"/>`;
+    }
+    out += text(box.x + 34, box.y + 16, "NON-MOVEMENT AREA", `class="minor"`);
+    out += `</g>`;
+  }
   return `${out}</g>`;
 }
 
@@ -1116,7 +1270,7 @@ export function render(model: SiteModel): string {
     : { end: 10.5, heading: 7.5, dims: 8, elev: 7, twy: 7, minor: 7, blast: 6.5 };
 
   // Whitespace-packed furniture registers first for the feature-label placer.
-  const furnitureBoxes = [furniture.comm, furniture.fieldElev, furniture.magVar, furniture.caution, furniture.pcn, furniture.notes, furniture.ramp].filter((box): box is Placement => Boolean(box));
+  const furnitureBoxes = [furniture.comm, furniture.fieldElev, furniture.magVar, furniture.caution, furniture.pcn, furniture.notes, furniture.ramp, furniture.lighting, furniture.hotspotTable, furniture.legend].filter((box): box is Placement => Boolean(box));
   for (const box of furnitureBoxes) placer.reserve(inflate(box, 4));
   const comm = commBlock(model, furniture.comm);
   const fieldElev = fieldElevBox(model, furniture.fieldElev, projection, placer);
@@ -1141,6 +1295,7 @@ export function render(model: SiteModel): string {
   const graticuleInk = graticule(model, projection, placer);
   const holdInk = holdAndLahso(model, projection, placer, fonts);
   const buildingInk = buildingsLayer(model, projection, placer, fonts);
+  const featureInk = featureLayer(model, projection, placer);
   const hotspotInk = hotspotLayer(model, projection, placer);
   const metadata = { seed: model.seed, role: model.role, archetype: model.terminalArchetype, id: model.identity.id, icao: model.identity.icao };
   return `<?xml version="1.0" encoding="UTF-8"?>\n` +
@@ -1157,5 +1312,5 @@ export function render(model: SiteModel): string {
     `.hotspot{stroke-width:1.2}.hot-text{font-size:7px;letter-spacing:.03em}.underline{text-decoration:underline}` +
     `</style><clipPath id="plot-clip"><rect x="${FRAME.x + 1}" y="${FRAME.y + 1}" width="${FRAME.w - 2}" height="${FRAME.h - 2}"/></clipPath></defs>` +
     `<rect width="${W}" height="${H}" fill="${WHITE}"/>${margins(model)}<rect x="${FRAME.x}" y="${FRAME.y}" width="${FRAME.w}" height="${FRAME.h}" fill="none" stroke="${BLACK}" stroke-width="1.04"/>` +
-    `<g clip-path="url(#plot-clip)">${graticuleInk}${pavement(model, projection)}${runwayInk}${holdInk}${buildingInk}${taxiwayInk}${comm}${fieldElev}${magvar}${bottom}${hotspotInk}</g></svg>`;
+    `<g clip-path="url(#plot-clip)">${graticuleInk}${pavement(model, projection)}${runwayInk}${holdInk}${buildingInk}${featureInk}${taxiwayInk}${comm}${fieldElev}${magvar}${bottom}${hotspotInk}</g></svg>`;
 }

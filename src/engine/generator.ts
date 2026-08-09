@@ -35,7 +35,7 @@ function runwayNumber(trueHeading: number, variation: number): number {
 }
 const reciprocalNumber = (n: number): number => ((n + 17) % 36) + 1;
 
-interface BankSlot { w: number; u: number; lengthScale: number; }
+interface BankSlot { w: number; u: number; lengthScale: number; /** Renumbering group (parallel pairs share a runway number). */ group?: number; }
 
 /** Parallel separations and staggers drawn from the standard families actually
  * charted (close dual, intermediate, wide independent), not one value per role. */
@@ -64,14 +64,32 @@ function bankSlots(role: Role, rng: RNG, primaryLength: number): BankSlot[] {
       ];
     }
     case "mega-hub": {
+      // 2-3 widely separated bank groups of 1-2 close parallels each: 4-6
+      // active runways in the primary family (ORD/DEN/AMS scale), not a fixed
+      // quad. Groups renumber independently.
       const gap = rng.pick([3900, 5200, 6600]);
-      const outer = rng.pick([700, 1000]);
-      return [
-        { w: gap / 2 + outer, u: stagger(), lengthScale: rng.float(0.85, 0.95) },
-        { w: gap / 2, u: 0, lengthScale: 1 },
-        { w: -gap / 2, u: stagger(), lengthScale: rng.float(0.9, 1) },
-        { w: -gap / 2 - outer, u: stagger(), lengthScale: rng.float(0.8, 0.9) },
-      ];
+      const pairSep = rng.pick([700, 1000]);
+      const groupCount = rng.chance(0.45) ? 3 : 2;
+      const centers = groupCount === 2 ? [gap / 2, -gap / 2] : [gap, 0, -gap];
+      const slots: BankSlot[] = [];
+      centers.forEach((center, group) => {
+        if (rng.chance(0.78)) {
+          slots.push({ w: center + pairSep / 2, u: stagger(), lengthScale: rng.float(0.85, 1), group });
+          slots.push({ w: center - pairSep / 2, u: stagger(), lengthScale: rng.float(0.8, 0.95), group });
+        } else {
+          slots.push({ w: center, u: stagger(), lengthScale: rng.float(0.85, 1), group });
+        }
+      });
+      // Mega fields never drop below four in the family: widen the outermost
+      // group into a pair if the draws ran lean.
+      let extra = 0;
+      while (slots.length < 4) {
+        extra++;
+        slots.push({ w: centers[0]! + pairSep / 2 + 2500 * extra, u: stagger(), lengthScale: rng.float(0.8, 0.9), group: centers.length + extra });
+      }
+      slots[0]!.lengthScale = 1;
+      slots[0]!.u = 0;
+      return slots;
     }
   }
 }
@@ -850,7 +868,7 @@ function fmtFreq(value: number): string {
   return twoDp.endsWith("0") ? snapped.toFixed(1) : twoDp;
 }
 
-function buildFrequencies(role: Role, rng: RNG, city: string, runways: Runway[], heading: number): { frequencies: Frequency[]; ramps: string[][] } {
+function buildFrequencies(role: Role, rng: RNG, city: string, runways: Runway[], heading: number, rampNames: string[]): { frequencies: Frequency[]; ramps: string[][] } {
   const draw = (low: number, high: number) => fmtFreq(rng.float(low, high));
   if (role === "basic-ga") {
     return { frequencies: [
@@ -882,11 +900,11 @@ function buildFrequencies(role: Role, rng: RNG, city: string, runways: Runway[],
   rows.push({ label: "CLNC DEL", value: draw(118, 135.95) });
   if (role === "major-hub" || role === "mega-hub") rows.push({ label: "CPDLC/PDC", value: "CLNC AVBL" });
 
+  // Ramp table rows come from the ramps that actually exist on this sheet.
   const ramps: string[][] = [];
   if (hub) {
-    const count = rng.int(3, 6);
-    const names = ["TERMINAL RAMP", "NORTH RAMP", "SOUTH RAMP", "EAST RAMP", "WEST RAMP", "CARGO RAMP", "INTL RAMP"];
-    for (const name of rng.shuffle(names).slice(0, count)) ramps.push([name, fmtFreq(rng.float(129, 132.95))]);
+    const names = ["TERMINAL RAMP", ...rampNames.filter((name) => name !== "TERMINAL RAMP")].slice(0, 6);
+    for (const name of names) ramps.push([name, fmtFreq(rng.float(129, 132.95))]);
     if (rng.chance(0.6)) ramps.push(["Snow and Ice", fmtFreq(rng.float(129, 132.95))]);
     ramps.push(["Non Movement Area", rng.pick(["131.375", "129.875", "130.575"])]);
   }
@@ -926,8 +944,20 @@ export function generate(seed: string, options: GenerateOptions = {}): SiteModel
   const runways: Runway[] = [];
   const appendFamily = (familyHeading: number, familySlots: BankSlot[], familyName: string, origin: Point = { x: 0, y: 0 }): void => {
     const familyFrame = frame(familyHeading);
-    // Four parallels renumber in two chunks of two (LAX/ATL pattern).
-    const chunks: BankSlot[][] = familySlots.length >= 4 ? [familySlots.slice(0, 2), familySlots.slice(2)] : [familySlots];
+    // Renumbering: explicit bank groups when present (mega layouts), otherwise
+    // four-plus parallels split into pairs (LAX/ATL pattern).
+    let chunks: BankSlot[][];
+    if (familySlots.some((slot) => slot.group !== undefined)) {
+      const byGroup = new Map<number, BankSlot[]>();
+      for (const slot of familySlots) {
+        const key = slot.group ?? 0;
+        if (!byGroup.has(key)) byGroup.set(key, []);
+        byGroup.get(key)!.push(slot);
+      }
+      chunks = [...byGroup.values()];
+    } else {
+      chunks = familySlots.length >= 4 ? [familySlots.slice(0, 2), familySlots.slice(2)] : [familySlots];
+    }
     const baseNumber = runwayNumber(familyHeading, identity.variation);
     chunks.forEach((chunk, chunkIndex) => {
       const number = ((baseNumber - 1 + chunkIndex) % 36) + 1;
@@ -1118,7 +1148,10 @@ export function generate(seed: string, options: GenerateOptions = {}): SiteModel
   ];
 
   const safeBuildings = enforceBuildingFreeZones(districts.buildings, zones, heading);
-  const { frequencies, ramps } = buildFrequencies(role, numbers.derive("freqs"), identity.city, runways, heading);
+  const rampNames = districts.aprons
+    .map((apron) => apron.label ?? "")
+    .filter((label) => label.includes("RAMP"));
+  const { frequencies, ramps } = buildFrequencies(role, numbers.derive("freqs"), identity.city, runways, heading, rampNames);
 
   // Beacon as a source fact: usually on the tower; otherwise a standalone site on
   // the landside belt, slid along the axis until it clears every runway corridor.
@@ -1141,6 +1174,93 @@ export function generate(seed: string, options: GenerateOptions = {}): SiteModel
     }
   }
 
+  // --- Role-gated located features and furniture families (Phase 4). ---
+  // Spec B6: sprinkle, never all at once — a per-sheet cap trims the draw.
+  const featureRng = layout.derive("features");
+  const activeRunways = runways.filter(isActive);
+  const commercial = role !== "basic-ga";
+  const precision = design.visibility === "1200";
+
+  for (const runway of activeRunways) {
+    const isPrimary = runway === activeRunways[0];
+    for (const end of runway.ends) {
+      const als = precision && featureRng.chance(isPrimary ? 0.85 : 0.5)
+        ? (runway.length > 10000 ? featureRng.pick(["ALSF-2", "SSALR"] as const) : "MALSR")
+        : role === "regional" && featureRng.chance(0.4) ? featureRng.pick(["MALSR", "ODALS"] as const) : undefined;
+      if (als) end.approachLights = als;
+      if (featureRng.chance(commercial ? 0.8 : 0.45)) {
+        end.vgsi = { kind: featureRng.chance(0.8) ? "PAPI" : "VASI", side: featureRng.chance(0.75) ? "L" : "R" };
+      }
+      if (!als && featureRng.chance(0.35)) end.reil = true;
+    }
+  }
+
+  const clearPoint = (p: Point, margin: number): boolean => runways.every((r) => {
+    const [ra, rb] = runwayEndpoints(r.center, r.heading, r.length);
+    return pointSegmentDistance(p, ra, rb) > margin + r.width / 2;
+  }) && zones.every((zone) => !pointInPolygon(p, zone));
+
+  const wanted: string[] = [];
+  const want = (name: string, p: number): void => { if (featureRng.chance(p)) wanted.push(name); };
+  want("lighting-notes", commercial ? 0.7 : 0.45);
+  want("declared-distances", hub ? 0.8 : role === "regional" ? 0.45 : 0);
+  want("wind-cone", role === "basic-ga" || role === "business-ga" ? 0.9 : role === "regional" ? 0.5 : 0.15);
+  want("helipad", hub ? 0.3 : role === "business-ga" ? 0.22 : 0.12);
+  want("deice", hub ? 0.55 : 0);
+  want("non-movement", 0.25);
+  want("hotspot-table", hub ? 0.6 : 0.3);
+  const families = new Set(featureRng.shuffle(wanted).slice(0, hub ? 4 : 3));
+
+  const lightingNotes: string[] = [];
+  if (families.has("lighting-notes")) {
+    if (featureRng.chance(0.55) || activeRunways.length === 1) lightingNotes.push("HIRL ALL RWYS");
+    else {
+      lightingNotes.push(`HIRL RWY ${activeRunways[0]!.id}`);
+      if (activeRunways[1]) lightingNotes.push(`MIRL RWY ${activeRunways[1]!.id}`);
+    }
+    const reils = activeRunways.flatMap((r) => r.ends.filter((end) => end.reil).map((end) => end.designator)).filter(Boolean);
+    if (reils.length > 0) lightingNotes.push(`REIL RWY${reils.length > 1 ? "S" : ""} ${reils.slice(0, 3).join(" AND ")}`);
+    if (activeRunways.some((r) => r.centerlineLights)) lightingNotes.push(`CL RWY ${activeRunways.find((r) => r.centerlineLights)!.id}`);
+  }
+
+  let windCone: SiteModel["windCone"] = null;
+  if (families.has("wind-cone")) {
+    const site = [0.3, -0.3, 0.45, -0.45, 0.6].map((f) => at(f * primaryLength / 2, side * (networkW + 700)))
+      .find((p) => clearPoint(p, 400));
+    if (site) windCone = { point: site, segmentedCircle: role === "basic-ga" ? featureRng.chance(0.8) : featureRng.chance(0.25) };
+  }
+
+  const helipads: Point[] = [];
+  if (families.has("helipad")) {
+    const site = [0.5, -0.5, 0.66, -0.66].map((f) => at(f * primaryLength / 2, side * (networkW + 950)))
+      .find((p) => clearPoint(p, 500));
+    if (site) helipads.push(site);
+  }
+
+  if (families.has("deice") && hub) {
+    // Deice pads sit on departure routes: beside the parallel near a primary end.
+    const primaryRunway = activeRunways[0]!;
+    const [pa, pb] = runwayEndpoints(primaryRunway.center, primaryRunway.heading, primaryRunway.length);
+    const inwardFrom = (endpoint: Point, other: Point): Point => ({ x: (other.x - endpoint.x) / primaryRunway.length, y: (other.y - endpoint.y) / primaryRunway.length });
+    [[pa, pb], [pb, pa]].slice(0, featureRng.chance(0.5) ? 2 : 1).forEach(([endpoint, other], i) => {
+      const inward = inwardFrom(endpoint!, other!);
+      const lateral = perp(inward);
+      const centerCandidates = [1, -1].map((s) => add(add(endpoint!, scale(inward, 1500)), scale(lateral, s * (design.runwayTaxiwaySeparation + 520))));
+      const center = centerCandidates.find((p) => clearPoint(p, 320));
+      if (!center) return;
+      const pad = rect(center, 520, 300, -primaryRunway.heading);
+      if (!zones.some((zone) => pad.some((p) => pointInPolygon(p, zone)))) {
+        districts.aprons.push({ id: `deice-${i}`, kind: "deice", label: "DEICE PAD", polygon: pad });
+      }
+    });
+  }
+
+  const nonMovementApronIds: string[] = [];
+  if (families.has("non-movement")) {
+    const candidatesNM = districts.aprons.filter((apron) => apron.kind === "ga" || apron.kind === "cargo" || apron.kind === "overflow");
+    if (candidatesNM.length > 0) nonMovementApronIds.push(candidatesNM[0]!.id);
+  }
+
   const closedStates = new Set<RunwayLifecycle>(["closed-indefinite", "closed-permanent", "removed"]);
   const cautions = [
     "CAUTION: BE ALERT TO RUNWAY CROSSING CLEARANCES.",
@@ -1161,6 +1281,10 @@ export function generate(seed: string, options: GenerateOptions = {}): SiteModel
     hotspots: deriveHotspots(runways, taxi.taxiways, role, layout.derive("hotspots")),
     lahso: deriveLahso(runways),
     frequencies, rampFrequencies: ramps, cautions, notes,
+    lightingNotes,
+    declaredDistances: families.has("declared-distances"),
+    windCone, helipads, nonMovementApronIds,
+    hotspotTable: families.has("hotspot-table"),
     terminalArchetype: archetype,
     chartNumber: julianDate(identity.cycle), alNumber: `AL-${numbers.int(1, 999)} (FAA)`,
     cycle: identity.cycle,

@@ -27,6 +27,8 @@ export interface DesignCode {
   holdDistance: number;
 }
 
+export type ApproachLightSystem = "MALSR" | "ALSF-2" | "SSALR" | "ODALS";
+
 export interface RunwayEnd {
   designator: string;
   elevation: number;
@@ -34,6 +36,11 @@ export interface RunwayEnd {
   displaced: number;
   blastPad: number;
   emas: number;
+  /** Approach light system, rendered as a miniature + circled letter (App 2). */
+  approachLights?: ApproachLightSystem;
+  /** Visual glide slope indicator on the stated side of the runway. */
+  vgsi?: { kind: "PAPI" | "VASI"; side: "L" | "R" };
+  reil?: boolean;
 }
 
 /** IAC 9 §3.5.2.2–3.5.2.4 pavement lifecycle states. Each state selects both a
@@ -220,6 +227,16 @@ export interface SiteModel {
   rampFrequencies: string[][];
   cautions: string[];
   notes: string[];
+  /** Grouped runway-lighting notes for the boxed block ("HIRL ALL RWYS"...). */
+  lightingNotes: string[];
+  /** Declared-distance information available: boxed negative-D indicator. */
+  declaredDistances: boolean;
+  windCone: { point: Point; segmentedCircle: boolean } | null;
+  helipads: Point[];
+  /** Apron ids whose building-side edge carries non-movement hatching + legend. */
+  nonMovementApronIds: string[];
+  /** Sheet carries the structured hot spot table (reasons surfaced). */
+  hotspotTable: boolean;
   terminalArchetype: TerminalArchetype;
   chartNumber: string;
   alNumber: string;
