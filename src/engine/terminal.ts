@@ -1,3 +1,4 @@
+import { traceUnion } from "./outline";
 import type { RNG } from "./rng";
 import type { AccretionOp, AircraftClass, Apron, Building, ComponentConnection, ComponentEdge, EdgeRole, Point, Role, Stand, Taxilane, TerminalArchetype, TerminalComponent, TerminalSystem, TerminalUnit } from "./types";
 
@@ -130,6 +131,76 @@ function bentBar(length: number, depth: number, angle: number): UV[] {
   ]);
 }
 
+/** Articulate a face: replace one long straight edge with a run of shallow
+ * setbacks and projections.
+ *
+ * Measured against reference/real-airports/faa, real terminal masses carry a
+ * p75 of ~69 vertices where a plain box has 4. That difference is not styling —
+ * it is jetway roots, baggage wings, service bays and phase joints, all of which
+ * a chart draws as small steps in the outline. Steps are shallow relative to the
+ * building depth so the silhouette still reads as one mass.
+ *
+ * `bias` pushes steps outward (+1) or inward (-1); gate faces bulge toward the
+ * apron at jetway roots, landside faces recess for curb frontage. */
+function articulate(a: UV, b: UV, steps: number, depth: number, bias: number, jitter: () => number): UV[] {
+  const du = b.u - a.u;
+  const dv = b.v - a.v;
+  const len = Math.hypot(du, dv);
+  if (steps < 1 || len < 120) return [a];
+  const dirU = du / len;
+  const dirV = dv / len;
+  // Outward normal for a CCW ring is (dv, -du) normalised.
+  const nU = dirV;
+  const nV = -dirU;
+  const out: UV[] = [a];
+  // Each step occupies a slot; the notch sits inside its slot with margins, so
+  // adjacent steps never merge into one long offset run.
+  for (let i = 0; i < steps; i++) {
+    const t0 = (i + 0.18 + jitter() * 0.12) / steps;
+    const t1 = (i + 0.82 - jitter() * 0.12) / steps;
+    const d = depth * (0.55 + jitter() * 0.75) * bias;
+    const p0 = { u: a.u + dirU * len * t0, v: a.v + dirV * len * t0 };
+    const p1 = { u: a.u + dirU * len * t1, v: a.v + dirV * len * t1 };
+    out.push(
+      p0,
+      { u: p0.u + nU * d, v: p0.v + nV * d },
+      { u: p1.u + nU * d, v: p1.v + nV * d },
+      p1,
+    );
+  }
+  return out;
+}
+
+/** Rebuild a polygon with its long edges articulated. Short edges pass through,
+ * so caps and connector stubs keep their clean geometry. */
+function articulatePolygon(poly: UV[], rng: RNG, intensity: number): UV[] {
+  if (intensity <= 0) return poly;
+  const out: UV[] = [];
+  const perimeter = poly.reduce((sum, p, i) => {
+    const q = poly[(i + 1) % poly.length]!;
+    return sum + Math.hypot(q.u - p.u, q.v - p.v);
+  }, 0);
+  const typical = perimeter / poly.length;
+  for (let i = 0; i < poly.length; i++) {
+    const a = poly[i]!;
+    const b = poly[(i + 1) % poly.length]!;
+    const len = Math.hypot(b.u - a.u, b.v - a.v);
+    // Only faces meaningfully longer than the shape's typical edge get steps;
+    // this keeps articulation on the long frontages where real detail lives.
+    if (len < Math.max(200, typical * 0.8) || !rng.chance(intensity)) {
+      out.push(a);
+      continue;
+    }
+    // Few, deep steps rather than many shallow ones: at chart scale a run of
+    // small notches reads as a ragged edge — noise — where one or two decisive
+    // wings read as building. Depth is a real fraction of the mass.
+    const steps = Math.max(1, Math.min(2, Math.floor(len / rng.float(700, 1100))));
+    const depth = Math.min(len * 0.13, rng.float(70, 150));
+    out.push(...articulate(a, b, steps, depth, rng.chance(0.62) ? 1 : -1, () => rng.next()));
+  }
+  return out.length >= 3 ? out : poly;
+}
+
 /** Arc band for curved terminals: chord half-length h, sag s → R = (h²+s²)/2s.
  * Convex side faces +v (airside). */
 function arcBand(u0: number, v0: number, chord: number, sag: number, width: number): UV[] {
@@ -220,7 +291,12 @@ interface Comp {
   unitId: string;
   kind: TerminalComponent["kind"];
   connection: ComponentConnection;
+  /** Structural shape: classification, stands and apron bands all derive from
+   * this, so it stays clean and its long faces stay single edges. */
   poly: UV[];
+  /** Silhouette actually drawn — `poly` with its long faces articulated. Kept
+   * separate so a jetway-root bulge never becomes its own "gate face". */
+  drawnPoly: UV[];
   faces: { role: EdgeRole; a: UV; b: UV; outward: UV; aircraftClass?: AircraftClass }[];
   drawn: boolean;
   label: string;
@@ -238,7 +314,7 @@ function makeComp(id: string, unitId: string, kind: TerminalComponent["kind"], c
     const role = rule.role(outward, i);
     faces.push({ role, a, b, outward, aircraftClass: role === "gate-face" ? rule.gateClass : undefined });
   }
-  return { id, unitId, kind, connection, poly, faces, drawn, label, buildingKind, unlabeled };
+  return { id, unitId, kind, connection, poly, drawnPoly: poly, faces, drawn, label, buildingKind, unlabeled };
 }
 
 /** Draw a gate class for a face from the program mix. */
@@ -528,19 +604,30 @@ export function buildTerminal(rng: RNG, role: Role, archetypePrior: TerminalArch
     const infilledIds = new Set(accretion.filter((op) => op.op === "infill-processor").map((op) => op.componentId));
     specs.forEach((spec, i) => {
       const u = (i - (specs.length - 1) / 2) * pitch;
+      // Units on a real unit-terminal field (JFK, LAX) sit around a loop, each
+      // set back by its own amount and turned to face its own piece of apron.
+      // A perfect comb at one pitch on one line — every unit at v=0 — is the
+      // single most artificial thing the old layout produced: the traced apron
+      // came out as one straight ribbon instead of a ring.
+      const setback = dimsRng.float(-260, 260);
+      const turn = dimsRng.float(-0.3, 0.3);
+      const place = (poly: UV[]): UV[] =>
+        rotateAbout(poly.map((p) => ({ u: p.u, v: p.v + setback })), { u, v: setback }, turn);
       const unit = addUnit(i, u, `TERMINAL ${i + 1}`, spec.processorLength, spec.processorDepth);
+      // The court moves with its unit, so landside stays landside after the turn.
+      unit.court = place(unit.court);
       const poly = infilledIds.has(`comp-processor-${i}`) ? bar(u, 0, spec.processorLength, spec.processorDepth) : notchedBox(u, 0, spec.processorLength, spec.processorDepth);
-      comps.push(makeComp(`comp-processor-${i}`, unit.id, "processor", "attached", poly, { ...processorRule(spec.style === "bar" ? "service" : "gate-face"), gateClass: spec.gateClass }, unit.name, "terminal"));
+      comps.push(makeComp(`comp-processor-${i}`, unit.id, "processor", "attached", place(poly), { ...processorRule(spec.style === "bar" ? "service" : "gate-face"), gateClass: spec.gateClass }, unit.name, "terminal"));
       if (spec.style === "pier") {
         const length = dimsRng.float(550, 850);
         comps.push(makeComp(`comp-unit-pier-${i}`, unit.id, "pier", "attached",
-          ccw([{ u: u - 70, v: spec.processorDepth / 2 }, { u: u + 70, v: spec.processorDepth / 2 }, { u: u + 70, v: spec.processorDepth / 2 + length }, { u: u - 70, v: spec.processorDepth / 2 + length }]),
+          place(ccw([{ u: u - 70, v: spec.processorDepth / 2 }, { u: u + 70, v: spec.processorDepth / 2 }, { u: u + 70, v: spec.processorDepth / 2 + length }, { u: u - 70, v: spec.processorDepth / 2 + length }])),
           pierRule(spec.gateClass), unit.name, "concourse", true, true));
       } else if (spec.style === "bar") {
-        comps.push(makeComp(`comp-unit-bar-${i}`, unit.id, "concourse", "attached", bar(u, spec.processorDepth / 2 + 280, dimsRng.float(750, 1050), 150), horizontalBarRule(spec.gateClass), unit.name, "concourse", true, true));
-        comps.push(makeComp(`comp-unit-stem-${i}`, unit.id, "connector", "attached", bar(u, spec.processorDepth / 2 + 140, 90, 280), connectorRule, "", "concourse", true, true));
+        comps.push(makeComp(`comp-unit-bar-${i}`, unit.id, "concourse", "attached", place(bar(u, spec.processorDepth / 2 + 280, dimsRng.float(750, 1050), 150)), horizontalBarRule(spec.gateClass), unit.name, "concourse", true, true));
+        comps.push(makeComp(`comp-unit-stem-${i}`, unit.id, "connector", "attached", place(bar(u, spec.processorDepth / 2 + 140, 90, 280)), connectorRule, "", "concourse", true, true));
       } else {
-        comps.push(makeComp(`comp-unit-arc-${i}`, unit.id, "concourse", "attached", arcBand(u, spec.processorDepth / 2 + 120, dimsRng.float(700, 950), dimsRng.float(160, 250), dimsRng.float(100, 130)), crescentRule(spec.gateClass), unit.name, "concourse", true, true));
+        comps.push(makeComp(`comp-unit-arc-${i}`, unit.id, "concourse", "attached", place(arcBand(u, spec.processorDepth / 2 + 120, dimsRng.float(700, 950), dimsRng.float(160, 250), dimsRng.float(100, 130))), crescentRule(spec.gateClass), unit.name, "concourse", true, true));
       }
     });
     // Road court spine: the loop/spine reservation that positions the units.
@@ -803,7 +890,41 @@ export function buildTerminal(rng: RNG, role: Role, archetypePrior: TerminalArch
       ]);
     }
   }
-  fillers.forEach((poly, i) => apronPieces.push({ id: `band-fill-${i}`, poly: ccw(poly) }));
+  // Courts are no longer a single half-plane once units are turned to face their
+  // own apron, so each filler is rejected outright if it reaches any court.
+  // Fill is opportunistic — dropping a piece costs nothing, paving a curb is a
+  // contract violation.
+  const courts = [...unitSpecs.map((u) => u.court), ...roadCourts];
+  const inPoly = (p: UV, poly: UV[]): boolean => {
+    let inside = false;
+    for (let i = 0, j = poly.length - 1; i < poly.length; j = i++) {
+      const a = poly[i]!;
+      const b = poly[j]!;
+      if ((a.v > p.v) !== (b.v > p.v) && p.u < ((b.u - a.u) * (p.v - a.v)) / (b.v - a.v) + a.u) inside = !inside;
+    }
+    return inside;
+  };
+  // True overlap, not bounding boxes: a turned unit's court sits diagonally
+  // across the frame, and its box would veto legitimate bays beside it.
+  const hitsCourt = (poly: UV[]): boolean =>
+    courts.some((court) => {
+      if (poly.some((p) => inPoly(p, court)) || court.some((p) => inPoly(p, poly))) return true;
+      // Sampled interior points catch a filler that straddles a court without
+      // either ring's vertices landing inside the other.
+      for (let t = 0.2; t < 1; t += 0.2) {
+        for (let s = 0.2; s < 1; s += 0.2) {
+          const a = poly[0]!;
+          const b = poly[1] ?? a;
+          const c = poly[2] ?? a;
+          const probe = { u: a.u + (b.u - a.u) * t + (c.u - b.u) * s, v: a.v + (b.v - a.v) * t + (c.v - b.v) * s };
+          if (inPoly(probe, court)) return true;
+        }
+      }
+      return false;
+    });
+  fillers
+    .filter((poly) => !hitsCourt(poly))
+    .forEach((poly, i) => apronPieces.push({ id: `band-fill-${i}`, poly: ccw(poly) }));
 
   const apronEdgeV = vCollector + COLLECTOR_W / 2;
 
@@ -817,6 +938,16 @@ export function buildTerminal(rng: RNG, role: Role, archetypePrior: TerminalArch
     uvLanes.push({ id: `lane-${laneIndex++}`, ownerId: "airside", kind: "throat", points: [{ u, v: vCollector }, { u, v: apronEdgeV }], width: 120 });
   }
 
+  // --- Silhouette articulation ---
+  // Structural `poly` has done its work (roles, stands, bands); the drawn shape
+  // now gains the small steps that separate a chart building from a box.
+  // Connectors and caps stay clean — they are short, and real charts draw them
+  // as simple stubs.
+  for (const comp of comps) {
+    const intensity = comp.kind === "connector" ? 0 : comp.kind === "processor" ? 0.85 : 0.6;
+    comp.drawnPoly = articulatePolygon(comp.poly, detailRng, intensity);
+  }
+
   // --- Assemble records (identity frame here; the district builder transforms) ---
   const toWorld = (p: UV): Point => at(p.u, p.v);
   // Everything drawn except non-bridge connectors (tunnels are not drawn at all).
@@ -826,10 +957,54 @@ export function buildTerminal(rng: RNG, role: Role, archetypePrior: TerminalArch
       id: comp.id,
       kind: comp.buildingKind,
       label: comp.label,
-      polygon: comp.poly.map(toWorld),
+      polygon: comp.drawnPoly.map(toWorld),
       unlabeled: comp.unlabeled,
     }));
-  const aprons: Apron[] = apronPieces.map((piece) => ({ id: piece.id, kind: "terminal" as const, polygon: piece.poly.map(toWorld) }));
+  // The apron is published as the traced boundary of every purposeful piece,
+  // not as the pieces themselves. Authoring stays per-purpose (each band still
+  // records why it exists); the sheet gets the one articulated outline a real
+  // chart draws. Reference median is 16 vertices — a rectangle per purpose is
+  // what made these read as stacked slabs.
+  // Simplification pulls the boundary in by up to `tolerance`, which can leave a
+  // gate face a few feet outside its own pavement. Pieces are grown by that much
+  // first so the traced edge lands outside every face it serves. Corners are
+  // chamfered by varying amounts at the same time: pavement edges splay and cut
+  // corners rather than turning square, and it is those cuts that give a real
+  // apron its many edge directions (reference median 8 per piece; unchamfered
+  // rectilinear pieces trace out at 2).
+  const grown = apronPieces.map((piece) => {
+    const ring = ccw(piece.poly);
+    const out: UV[] = [];
+    for (let i = 0; i < ring.length; i++) {
+      const prev = ring[(i - 1 + ring.length) % ring.length]!;
+      const cur = ring[i]!;
+      const next = ring[(i + 1) % ring.length]!;
+      // Offset along the two adjacent edge normals, not radially from the
+      // centroid: a gate band is long and thin, and a radial push barely moves
+      // its far ends outward — which left faces stranded just outside the
+      // simplified boundary.
+      const nA = outwardOf(prev, cur);
+      const nB = outwardOf(cur, next);
+      const nu = nA.u + nB.u;
+      const nv = nA.v + nB.v;
+      const nlen = Math.hypot(nu, nv) || 1;
+      const push = { u: cur.u + (nu / nlen) * 34, v: cur.v + (nv / nlen) * 34 };
+      const inA = Math.hypot(cur.u - prev.u, cur.v - prev.v);
+      const inB = Math.hypot(next.u - cur.u, next.v - cur.v);
+      const cut = Math.min(detailRng.float(40, 190), inA * 0.42, inB * 0.42);
+      if (cut < 35) {
+        out.push(push);
+        continue;
+      }
+      out.push(
+        { u: push.u - ((cur.u - prev.u) / inA) * cut, v: push.v - ((cur.v - prev.v) / inA) * cut },
+        { u: push.u + ((next.u - cur.u) / inB) * cut, v: push.v + ((next.v - cur.v) / inB) * cut },
+      );
+    }
+    return out.map((p) => at(p.u, p.v));
+  });
+  const traced = traceUnion(grown, { cell: 25, tolerance: 28, minArea: 12000 });
+  const aprons: Apron[] = traced.map((polygon, i) => ({ id: `band-apron-${i}`, kind: "terminal" as const, polygon }));
   // RON ramp markers between parallel bars keep their labels.
   if (family === "parallel") {
     const barComps = comps.filter((c) => c.id.startsWith("comp-bar-"));

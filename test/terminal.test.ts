@@ -124,33 +124,25 @@ describe("terminal rebuild contract (Phase 3)", () => {
     expect(satellites).toBeGreaterThan(0);
   });
 
-  test("apron outline is derived from stands and taxilanes, not steppedEdge rectangles", () => {
+  test("apron is a traced articulated outline, not a rectangle per purpose", () => {
+    // Measured from reference/real-airports/faa (10 charts, 3,860 significant
+    // apron paths): median 16 vertices, p75 27, and only 7% are rectangle-like.
+    // Emitting one 4-vertex rectangle per purpose is what made generated sheets
+    // read as stacked slabs, so the contract is stated in those terms.
+    const vertexCounts: number[] = [];
     for (const fixture of terminalFixtures) {
       const model = generate(fixture.seed, fixture.options);
       const terminalAprons = model.aprons.filter((apron) => apron.kind === "terminal");
-      expect(terminalAprons.length).toBeGreaterThan(2);
-      // Every piece is a recorded derivation (gate band, alley elbow, collector,
-      // root residual) — no monolithic apron ids survive.
-      for (const apron of terminalAprons) expect(apron.id).toMatch(/^band-/);
-      // No single piece is the bounding rectangle of the whole complex.
-      const terminalBuildings = model.buildings.filter((b) => b.kind === "terminal" || b.kind === "concourse");
-      const hull = {
-        minX: Math.min(...terminalBuildings.flatMap((b) => b.polygon.map((p) => p.x))),
-        maxX: Math.max(...terminalBuildings.flatMap((b) => b.polygon.map((p) => p.x))),
-        minY: Math.min(...terminalBuildings.flatMap((b) => b.polygon.map((p) => p.y))),
-        maxY: Math.max(...terminalBuildings.flatMap((b) => b.polygon.map((p) => p.y))),
-      };
-      for (const apron of terminalAprons) {
-        const box = {
-          minX: Math.min(...apron.polygon.map((p) => p.x)),
-          maxX: Math.max(...apron.polygon.map((p) => p.x)),
-          minY: Math.min(...apron.polygon.map((p) => p.y)),
-          maxY: Math.max(...apron.polygon.map((p) => p.y)),
-        };
-        const containsHull = box.minX <= hull.minX && box.maxX >= hull.maxX && box.minY <= hull.minY && box.maxY >= hull.maxY;
-        expect(containsHull).toBeFalse();
-      }
+      expect(terminalAprons.length).toBeGreaterThan(0);
+      const largest = terminalAprons.reduce((best, a) => (a.polygon.length > best.polygon.length ? a : best));
+      // The main mass of every complex is an articulated outline.
+      expect(largest.polygon.length).toBeGreaterThanOrEqual(8);
+      for (const apron of terminalAprons) vertexCounts.push(apron.polygon.length);
     }
+    const rectangleLike = vertexCounts.filter((n) => n <= 5).length / vertexCounts.length;
+    expect(rectangleLike).toBeLessThan(0.5);
+    const median = vertexCounts.sort((a, b) => a - b)[Math.floor(vertexCounts.length / 2)]!;
+    expect(median).toBeGreaterThanOrEqual(8);
   });
 
   test("every silhouette irregularity cites a recorded accretion operation", () => {
