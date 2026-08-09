@@ -96,6 +96,25 @@ describe("population", () => {
     }
   });
 
+  // Phase 5 calibration: semantic diversity metrics, not vertex counts.
+  test("terminal family and unit-count distributions stay diverse at hub scale", () => {
+    for (const role of ["major-hub", "mega-hub"] as const) {
+      const familyCounts = new Map<string, number>();
+      const unitCounts = new Set<number>();
+      const total = 70;
+      for (let i = 0; i < total; i++) {
+        const model = generate(`calibration-${i}`, { role });
+        familyCounts.set(model.terminalArchetype, (familyCounts.get(model.terminalArchetype) ?? 0) + 1);
+        if (model.terminal) unitCounts.add(model.terminal.units.length);
+      }
+      // Several families appear and none dominates the population.
+      expect(familyCounts.size).toBeGreaterThanOrEqual(3);
+      for (const count of familyCounts.values()) expect(count).toBeLessThan(total * 0.75);
+      // Unit counts vary (single-processor systems up to multi-unit rows).
+      expect(unitCounts.size).toBeGreaterThanOrEqual(3);
+    }
+  });
+
   test("district composition varies across seeds within each role", () => {
     for (const role of ["business-ga", "regional", "mid-hub"] as const) {
       const sets = new Set<string>();

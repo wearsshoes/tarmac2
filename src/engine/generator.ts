@@ -1,5 +1,5 @@
 import { RNG } from "./rng";
-import { add, perp, pointAlong, pointInPolygon, pointSegmentDistance, polar, polylineDistance, rect, runwayEndpoints, scale, segmentIntersection, sub } from "./geometry";
+import { add, perp, pointAlong, pointInPolygon, pointSegmentDistance, polar, polylineDistance, rect, runwayEndpoints, scale, segmentIntersection } from "./geometry";
 import { makeIdentity } from "./identity";
 import { buildTerminal, type TerminalComplex } from "./terminal";
 import type { Apron, Beacon, Building, DesignCode, Frequency, GenerateOptions, HoldLine, Hotspot, Identity, LahsoMark, Point, Role, Runway, RunwayEnd, RunwayLifecycle, SiteModel, Stand, Taxilane, Taxiway, TerminalArchetype, TerminalSystem } from "./types";

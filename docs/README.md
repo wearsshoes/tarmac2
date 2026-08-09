@@ -1,8 +1,16 @@
 # TARMAC documentation map
 
-This directory is prepared for the next implementation pass. It separates normative
-requirements, execution plans, evidence, and historical notes so that an old punch-list
-item cannot silently override the researched design.
+This directory separates normative requirements, execution plans, evidence, and
+historical notes so that an old punch-list item cannot silently override the researched
+design.
+
+**Status (Aug 2026):** the `edit-plan.md` phases 0–5 are implemented — lifecycle
+portrayals, margin grammar, tangent labels (Phase 1); threshold clusters, corridor
+repairs, turnarounds (Phase 2); the program-first terminal rebuild at bounding 2.5 with
+the midfield-only parallel rule (Phase 3); role-gated located-feature families
+(Phase 4); calibration metrics, app controls, and export cleanup (Phase 5). All 20
+recorded contract tests are live; `bun run contact-sheet` renders the fixture set for
+visual review.
 
 ## Authority order
 

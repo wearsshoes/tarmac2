@@ -353,7 +353,7 @@ function graticule(model: SiteModel, projection: Projection, placer: LabelPlacer
   const { lat, lon } = model.identity;
   const spanMinutes = PLOT.h / projection.distance(FEET_PER_MINUTE);
   const step = [0.25, 0.5, 1, 2, 5].find((s) => spanMinutes / s <= 5) ?? 5;
-  let out = `<g id="graticule" class="thin">`;
+  let out = `<g id="graticule" class="grat">`;
   const clamp = { x0: PLOT.x, x1: PLOT.x + PLOT.w, y0: PLOT.y, y1: PLOT.y + PLOT.h };
   const lonScale = Math.max(0.2, Math.cos((lat * Math.PI) / 180));
 
@@ -1306,7 +1306,7 @@ export function render(model: SiteModel): string {
     `.title{font-size:17px}.margin{font-size:10px}.small{font-size:8px}.micro{font-size:6.5px}` +
     `.runway-end{font-weight:700}.hdg{font-size:7.5px}.dims{font-size:8px}.elev{font-size:7px}.twy{font-size:7px}.minor{font-size:7px}.blast{font-size:6.5px}` +
     `.hdg,.dims,.elev,.twy,.minor,.blast{letter-spacing:.04em}` +
-    `.thin{stroke:${BLACK};stroke-width:.52;fill:none}.halo{paint-order:stroke;stroke:${WHITE};stroke-width:2.6px;stroke-linejoin:round}` +
+    `.thin{stroke:${BLACK};stroke-width:.52;fill:none}.grat{stroke:${BLACK};stroke-width:.4;fill:none}.halo{paint-order:stroke;stroke:${WHITE};stroke-width:2.1px;stroke-linejoin:round}` +
     `.centerlights{fill:none;stroke:${WHITE};stroke-width:.85;stroke-dasharray:.9 3.6;stroke-linecap:butt}` +
     `.dotted{stroke:${BLACK};stroke-width:.52;stroke-dasharray:.6 2.2;stroke-linecap:round}` +
     `.hotspot{stroke-width:1.2}.hot-text{font-size:7px;letter-spacing:.03em}.underline{text-decoration:underline}` +
