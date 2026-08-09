@@ -728,7 +728,9 @@ function taxiwayLabels(model: SiteModel, projection: Projection, placer: LabelPl
         }
       }
     }
-    if (!placedAny) {
+    // Spine taxiways always keep at least one identifier; numbered connector
+    // stubs may drop theirs on a congested sheet (their siblings remain).
+    if (!placedAny && (taxiway.kind === "parallel" || taxiway.kind === "service")) {
       const candidates = candidatesAt(0.5, twyIndex % 2 === 0 ? 1 : -1);
       const fallbackSize = Math.max(4.6, fonts.twy - 1.7);
       const angle = candidates[0]?.angle ?? 0;

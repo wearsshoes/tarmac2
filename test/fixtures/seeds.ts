@@ -77,10 +77,10 @@ export const fixtures: Fixture[] = [
   },
   {
     name: "arch-parallel",
-    seed: "fixture-arch-parallel",
-    options: { role: "major-hub", archetype: "parallel" },
-    why: "parallel midfield concourse ranks; RON ramps between bars; dotted future runway",
-    summary: { role: "major-hub", archetype: "parallel", openRunways: 3, closedRunways: 1, headingFamilies: 1 },
+    seed: "fixture-arch-parallel-5",
+    options: { role: "mega-hub", archetype: "parallel" },
+    why: "midfield parallel concourse ranks between the banks (ATL grammar; midfield-only rule)",
+    summary: { role: "mega-hub", archetype: "parallel", openRunways: 4, closedRunways: 0, headingFamilies: 1 },
   },
   {
     name: "arch-satellite",
@@ -121,8 +121,8 @@ export const fixtures: Fixture[] = [
     name: "mixed-family-hub",
     seed: "scan-0",
     options: { role: "major-hub" },
-    why: "two runway heading families at hub scale (crossing geometry, hotspots)",
-    summary: { role: "major-hub", archetype: "parallel", openRunways: 3, closedRunways: 0, headingFamilies: 2 },
+    why: "two runway heading families at hub scale (crossing geometry, hotspots); parallel prior downgrades to pier off-midfield",
+    summary: { role: "major-hub", archetype: "pier", openRunways: 3, closedRunways: 0, headingFamilies: 2 },
   },
   {
     name: "compact-sheet",

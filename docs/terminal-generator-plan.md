@@ -134,6 +134,11 @@ frontage length vs. site depth), with role priors as tie-breakers. An override o
 is honored only when feasible; otherwise return the nearest valid family with a
 diagnostic.
 
+**Midfield-only rule (recorded ruling):** the parallel/midfield family exists only
+between two runway banks, bars parallel to the runways — the ATL grammar is what the
+family *is*. A site whose bank gap cannot hold the midfield apron (or that has mixed
+runway heading families) downgrades to pier; outboard parallel ranks are never drawn.
+
 ### 5. Component geometry and edge roles
 
 Lay out components with dimensions from `terminal-design.md` (gate pitch by class,

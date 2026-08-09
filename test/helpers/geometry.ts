@@ -54,6 +54,17 @@ export function polygonContained(inner: Pt[], container: Pt[]): boolean {
   return true;
 }
 
+/** True when the polygons share any area (vertex containment or edge crossing). */
+export function polygonsOverlap(a: Pt[], b: Pt[]): boolean {
+  if (a.some((p) => pointInPolygon(p, b)) || b.some((p) => pointInPolygon(p, a))) return true;
+  for (let i = 0; i < a.length; i++) {
+    for (let j = 0; j < b.length; j++) {
+      if (segmentIntersection(a[i]!, a[(i + 1) % a.length]!, b[j]!, b[(j + 1) % b.length]!)) return true;
+    }
+  }
+  return false;
+}
+
 export function clearsRunway(polygon: Pt[], runway: SiteModel["runways"][number], margin = 25): boolean {
   const [a, b] = runwayEndpoints(runway.center, runway.heading, runway.length);
   const clearance = runway.width / 2 + margin;

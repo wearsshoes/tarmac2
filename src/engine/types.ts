@@ -124,6 +124,79 @@ export interface Beacon {
   onTower: boolean;
 }
 
+// --- Terminal subsystem (terminal-generator-plan.md, bounding level 2.5) ---
+
+export type AircraftClass = "regional" | "narrow" | "wide";
+
+/** Every exposed building face is classified before any apron is derived. */
+export type EdgeRole = "gate-face" | "landside-curb" | "connector" | "service" | "expansion-end" | "internal";
+
+/** How a component joins its parent; tunnel connectors are simply not drawn. */
+export type ComponentConnection = "attached" | "bridge" | "tunnel" | "at-grade";
+
+export interface ComponentEdge {
+  role: EdgeRole;
+  a: Point;
+  b: Point;
+  /** Design class of the stands served, gate faces only. */
+  aircraftClass?: AircraftClass;
+}
+
+export interface TerminalComponent {
+  id: string;
+  unitId: string;
+  kind: "processor" | "concourse" | "pier" | "satellite" | "connector";
+  connection: ComponentConnection;
+  polygon: Polygon;
+  edges: ComponentEdge[];
+}
+
+/** An independently processed terminal unit (own curb and processor). */
+export interface TerminalUnit {
+  id: string;
+  name: string;
+  /** Reserved curb/parking polygon — never aircraft apron. */
+  landsideCourt: Polygon;
+  curbLength: number;
+  parkingDepth: number;
+}
+
+/** Aircraft stand envelope; generated to validate footprint and circulation. */
+export interface Stand {
+  id: string;
+  /** Component id (terminal stands) or apron id (district stand rows). */
+  ownerId: string;
+  center: Point;
+  /** Unit vector, nose direction (toward the served face). */
+  facing: Point;
+  aircraftClass: AircraftClass;
+  pitch: number;
+  depth: number;
+}
+
+export interface Taxilane {
+  id: string;
+  ownerId: string;
+  kind: "alley" | "collector" | "throat";
+  points: Point[];
+  width: number;
+}
+
+export interface AccretionOp {
+  op: "lengthen" | "add-pier" | "cap-pier" | "detach-satellite" | "infill-processor" | "add-unit";
+  componentId: string;
+  cause: string;
+}
+
+export interface TerminalSystem {
+  units: TerminalUnit[];
+  components: TerminalComponent[];
+  /** Loop/spine reservations for unit and curvilinear families (negative space). */
+  roadCourts: Polygon[];
+  accretion: AccretionOp[];
+  gatesPlanned: number;
+}
+
 export interface SiteModel {
   seed: string;
   identity: Identity;
@@ -138,6 +211,9 @@ export interface SiteModel {
   aprons: Apron[];
   buildings: Building[];
   beacon: Beacon | null;
+  terminal: TerminalSystem | null;
+  stands: Stand[];
+  taxilanes: Taxilane[];
   hotspots: Hotspot[];
   lahso: LahsoMark[];
   frequencies: Frequency[];

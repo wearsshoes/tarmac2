@@ -26,8 +26,13 @@ describe("determinism", () => {
     expect(cities.size).toBeGreaterThan(30);
   });
 
-  // Phase-contract (edit-plan Decisions & cuts #6): adding RNG draws inside one
-  // subsystem stream must leave other subsystems' summaries unchanged. Becomes
-  // testable when the terminal rebuild adds its own streams.
-  test.todo("stream isolation: extra terminal-detail draws do not change identity or runway summary", () => {});
+  // Edit-plan Decisions & cuts #6: terminal draws live in their own streams, so
+  // radically different terminal programs leave identity and runways untouched.
+  test("stream isolation: extra terminal-detail draws do not change identity or runway summary", () => {
+    const base = generate("stream-iso", { role: "major-hub", archetype: "pier" });
+    const other = generate("stream-iso", { role: "major-hub", archetype: "satellite" });
+    expect(other.identity).toEqual(base.identity);
+    expect(other.runways).toEqual(base.runways);
+    expect(other.terminalArchetype).not.toBe(base.terminalArchetype);
+  });
 });

@@ -2,7 +2,7 @@ import { RNG } from "./rng";
 import { add, perp, pointAlong, pointInPolygon, pointSegmentDistance, polar, polylineDistance, rect, runwayEndpoints, scale, segmentIntersection, sub } from "./geometry";
 import { makeIdentity } from "./identity";
 import { buildTerminal, type TerminalComplex } from "./terminal";
-import type { Apron, Beacon, Building, DesignCode, Frequency, GenerateOptions, HoldLine, Hotspot, Identity, LahsoMark, Point, Role, Runway, RunwayEnd, RunwayLifecycle, SiteModel, Taxiway, TerminalArchetype } from "./types";
+import type { Apron, Beacon, Building, DesignCode, Frequency, GenerateOptions, HoldLine, Hotspot, Identity, LahsoMark, Point, Role, Runway, RunwayEnd, RunwayLifecycle, SiteModel, Stand, Taxilane, Taxiway, TerminalArchetype, TerminalSystem } from "./types";
 
 /** Only active runways get taxiway service, hotspots, LAHSO, and RPZs. */
 const isActive = (runway: Runway): boolean => runway.lifecycle === "active";
@@ -478,7 +478,7 @@ function compassName(point: Point): string {
   return COMPASS[Math.round(angle / 45) % 8]!;
 }
 
-interface Districts { buildings: Building[]; aprons: Apron[]; throats: Taxiway[]; }
+interface Districts { buildings: Building[]; aprons: Apron[]; throats: Taxiway[]; terminal: TerminalSystem | null; stands: Stand[]; taxilanes: Taxilane[] }
 
 /** District & facility zoo per harvest H5 cluster recipes. */
 function buildDistricts(rng: RNG, role: Role, archetype: TerminalArchetype, heading: number, primaryLength: number, side: number, outerW: number, networkW: number, design: DesignCode, runways: Runway[], zones: Point[][], complex: TerminalComplex | null, midfieldGap: [number, number] | null): Districts {
@@ -488,6 +488,9 @@ function buildDistricts(rng: RNG, role: Role, archetype: TerminalArchetype, head
   const buildings: Building[] = [];
   const aprons: Apron[] = [];
   const throats: Taxiway[] = [];
+  let terminal: TerminalSystem | null = null;
+  const stands: Stand[] = [];
+  const taxilanes: Taxilane[] = [];
   const wAt = (w: number) => side * w;
   const uSpread = primaryLength / 2;
   // Clearance considers every runway with visible pavement, including non-active
@@ -520,10 +523,30 @@ function buildDistricts(rng: RNG, role: Role, archetype: TerminalArchetype, head
   const slide = (candidates: number[], footprint: (u: number) => Point[], margin = 520): number =>
     candidates.find((u) => clearOfRunways(footprint(u), margin)) ?? candidates[0]!;
 
+  // District aprons carry stand rows + a taxilane, not just a labeled polygon
+  // (terminal-generator-plan stage 8, reduced-fidelity stand-row vocabulary).
+  const lateralDir = perp(polar(heading));
+  const standRow = (apronId: string, uCenter: number, halfLen: number, wRow: number, wAlley: number, rowSide: number, pitch: number, cls: "regional" | "narrow" | "wide", facingOut: boolean): void => {
+    const count = Math.max(2, Math.min(14, Math.floor((2 * halfLen - 80) / pitch)));
+    const facing = scale(lateralDir, rowSide * (facingOut ? 1 : -1));
+    for (let i = 0; i < count; i++) {
+      const u = uCenter - ((count - 1) / 2) * pitch + i * pitch;
+      stands.push({
+        id: `stand-${apronId}-${i}`, ownerId: apronId,
+        center: at(u, rowSide * wRow), facing,
+        aircraftClass: cls, pitch, depth: cls === "wide" ? 190 : cls === "narrow" ? 140 : 100,
+      });
+    }
+    taxilanes.push({
+      id: `lane-${apronId}`, ownerId: apronId, kind: "alley", width: 60,
+      points: [at(uCenter - halfLen + 60, rowSide * wAlley), at(uCenter + halfLen - 60, rowSide * wAlley)],
+    });
+  };
+
   let terminalSpanU: [number, number] = [0, 0];
   if (complex) {
     const preferredU = rng.float(-0.18, 0.18) * primaryLength;
-    const candidates = [preferredU, ...[-0.12, 0.12, -0.25, 0.25, -0.38, 0.38, -0.52, 0.52].map((fraction) => fraction * primaryLength)];
+    const candidates = [preferredU, ...[-0.12, 0.12, -0.25, 0.25, -0.38, 0.38, -0.52, 0.52, -0.66, 0.66, -0.8, 0.8].map((fraction) => fraction * primaryLength)];
     const terminalPolygons = (u: number): { buildings: Point[][]; aprons: Point[][] } => {
       if (midfieldGap) {
         const mid = (midfieldGap[0] + midfieldGap[1]) / 2;
@@ -538,12 +561,37 @@ function buildDistricts(rng: RNG, role: Role, archetype: TerminalArchetype, head
       const polygons = terminalPolygons(u);
       return polygons.buildings.every((polygon) => clearOfRunways(polygon, 500)) && polygons.aprons.every((polygon) => clearOfRunways(polygon, 120));
     }) ?? candidates[candidates.length - 1]!;
+    // Transform every typed record — hierarchy, edges, stands, taxilanes,
+    // courts — through the same placement as the drawn polygons.
+    const placeSystem = (toWorld: (p: Point) => Point): void => {
+      const mapPoly = (poly: Point[]): Point[] => poly.map(toWorld);
+      const origin = toWorld({ x: 0, y: 0 });
+      const mapDir = (d: Point): Point => {
+        const q = toWorld(d);
+        const len = Math.hypot(q.x - origin.x, q.y - origin.y) || 1;
+        return { x: (q.x - origin.x) / len, y: (q.y - origin.y) / len };
+      };
+      terminal = {
+        units: complex.system.units.map((unit) => ({ ...unit, landsideCourt: mapPoly(unit.landsideCourt) })),
+        components: complex.system.components.map((component) => ({
+          ...component,
+          polygon: mapPoly(component.polygon),
+          edges: component.edges.map((edge) => ({ ...edge, a: toWorld(edge.a), b: toWorld(edge.b) })),
+        })),
+        roadCourts: complex.system.roadCourts.map(mapPoly),
+        accretion: complex.system.accretion,
+        gatesPlanned: complex.system.gatesPlanned,
+      };
+      stands.push(...complex.stands.map((stand) => ({ ...stand, center: toWorld(stand.center), facing: mapDir(stand.facing) })));
+      taxilanes.push(...complex.taxilanes.map((lane) => ({ ...lane, points: lane.points.map(toWorld) })));
+    };
     if (midfieldGap) {
       // Midfield complex between the runway banks (ATL/DEN pattern).
       const mid = (midfieldGap[0] + midfieldGap[1]) / 2;
       const toWorld = (p: Point) => at(uTerm + p.x, mid + side * (p.y - complex.apronEdgeV / 2));
       for (const building of complex.buildings) buildings.push({ ...building, polygon: building.polygon.map(toWorld) });
       for (const apron of complex.aprons) aprons.push({ ...apron, polygon: apron.polygon.map(toWorld) });
+      placeSystem(toWorld);
       const edgeW = mid + side * (complex.apronEdgeV / 2);
       const target = side > 0 ? Math.max(...midfieldGap) - design.runwayTaxiwaySeparation : Math.min(...midfieldGap) + design.runwayTaxiwaySeparation;
       for (const [i, u] of complex.throats.entries()) {
@@ -554,6 +602,7 @@ function buildDistricts(rng: RNG, role: Role, archetype: TerminalArchetype, head
       const toWorld = (p: Point) => at(uTerm + p.x, wAt(edgeW + (complex.apronEdgeV - p.y)));
       for (const building of complex.buildings) buildings.push({ ...building, polygon: building.polygon.map(toWorld) });
       for (const apron of complex.aprons) aprons.push({ ...apron, polygon: apron.polygon.map(toWorld) });
+      placeSystem(toWorld);
       for (const [i, u] of complex.throats.entries()) {
         throats.push({ id: `throat-${i}`, name: "", points: [at(uTerm + u, wAt(edgeW + 10)), at(uTerm + u, wAt(networkW))], width: hub ? 90 : 60, kind: "apron-throat", unlabeled: true });
       }
@@ -579,6 +628,7 @@ function buildDistricts(rng: RNG, role: Role, archetype: TerminalArchetype, head
       id: "ga-apron", kind: "ga", label: "GENERAL AVIATION PARKING", tieDowns: true,
       polygon: [at(uGA - halfLen, gaSide * gaW), at(uGA + halfLen, gaSide * gaW), at(uGA + halfLen, gaSide * (gaW + depth)), at(uGA - halfLen, gaSide * (gaW + depth))],
     });
+    standRow("ga-apron", uGA, halfLen, gaW + depth * 0.62, gaW + depth * 0.25, gaSide, 110, "regional", true);
     const rows = rng.int(1, 3);
     const cols = rng.int(2, 6);
     for (let row = 0; row < rows; row++) for (let col = 0; col < cols; col++) {
@@ -613,6 +663,7 @@ function buildDistricts(rng: RNG, role: Role, archetype: TerminalArchetype, head
     for (let i = 0; i < cargoCount; i++) {
       buildings.push({ id: `cargo-${i}`, kind: "cargo", label: "CARGO", unlabeled: i > 0, polygon: rect(at(uCargo - ((cargoCount - 1) / 2) * 420 + i * 420, cargoSide * (networkW + 470 + 340 - 70)), 340, 140, -heading) });
     }
+    standRow("cargo-apron", uCargo, half, networkW + 380, networkW + 240, cargoSide, hub ? 230 : 150, hub ? "wide" : "narrow", true);
     throats.push({ id: "cargo-throat", name: "", points: [at(uCargo, cargoSide * (networkW + 200)), at(uCargo, cargoSide * networkW)], width: 60, kind: "apron-throat", unlabeled: true });
   }
 
@@ -644,6 +695,7 @@ function buildDistricts(rng: RNG, role: Role, archetype: TerminalArchetype, head
     const safeUMil = slide([uMil, -uMil, uMil * 0.65, -uMil * 0.65], militaryFootprint, 200);
     if (clearOfRunways(militaryFootprint(safeUMil), 200)) {
       aprons.push({ id: "military-apron", kind: "military", label, polygon: [at(safeUMil - 420, -side * (networkW + 180)), at(safeUMil + 420, -side * (networkW + 180)), at(safeUMil + 420, -side * (networkW + 500)), at(safeUMil - 420, -side * (networkW + 500))] });
+      standRow("military-apron", safeUMil, 420, networkW + 400, networkW + 250, -side, 150, "narrow", true);
       for (let i = 0; i < 2; i++) buildings.push({ id: `military-${i}`, kind: "military", label, unlabeled: true, polygon: rect(at(safeUMil - 180 + i * 360, -side * (networkW + 500 + 360 - 65)), 240, 130, -heading) });
       throats.push({ id: "military-throat", name: "", points: [at(safeUMil, -side * (networkW + 200)), at(safeUMil, -side * networkW)], width: 60, kind: "apron-throat", unlabeled: true });
     }
@@ -677,19 +729,23 @@ function buildDistricts(rng: RNG, role: Role, archetype: TerminalArchetype, head
     buildings.push({ id: `tower-${i}`, kind: "tower", label: "TWR", unlabeled: i > 0, polygon: rect(at(u, towerW), 90, 90, -heading) });
   }
 
-  // Overflow apron named by compass position.
+  // Overflow apron named by compass position, long axis along the field.
   if (hub && rng.chance(0.6)) {
     const uOver0 = rng.pick([-1, 1]) * rng.float(0.35, 0.55) * uSpread;
-    const footprint = (u: number) => rect(at(u, -side * (networkW + 300)), 640, 280, -heading);
+    const footprint = (u: number) => [
+      at(u - 320, -side * (networkW + 160)), at(u + 320, -side * (networkW + 160)),
+      at(u + 320, -side * (networkW + 440)), at(u - 320, -side * (networkW + 440)),
+    ];
     const uOver = slide([uOver0, -uOver0, uOver0 * 1.5, -uOver0 * 1.5], footprint, 100);
     const center = at(uOver, -side * (networkW + 300));
     if (clearOfRunways(footprint(uOver), 100)) {
       aprons.push({ id: "overflow", kind: "overflow", label: `${compassName(center)} RAMP`, polygon: footprint(uOver) });
+      standRow("overflow", uOver, 320, networkW + 360, networkW + 220, -side, 150, "narrow", true);
       throats.push({ id: "overflow-throat", name: "", points: [at(uOver, -side * (networkW + 180)), at(uOver, -side * networkW)], width: 60, kind: "apron-throat", unlabeled: true });
     }
   }
 
-  return { buildings, aprons, throats };
+  return { buildings, aprons, throats, terminal, stands, taxilanes };
 }
 
 function enforceBuildingFreeZones(buildings: Building[], zones: Point[][], heading: number): Building[] {
@@ -997,21 +1053,37 @@ export function generate(seed: string, options: GenerateOptions = {}): SiteModel
   const outerW = networkW + 120;
   const coreW = side * (outerW + 800);
 
-  const archetype = terminalChoice(role, layout.derive("archetype"), options.archetype);
-  const complex = archetype === "none" ? null : buildTerminal(districtRng.derive("morph"), role, archetype, (u, v) => ({ x: u, y: v }));
+  // The role supplies a prior; the terminal builder honors it only when the
+  // program can fill it, so the model records the family actually built.
+  const archetypePrior = terminalChoice(role, layout.derive("archetype"), options.archetype);
+  const localFrame = (u: number, v: number): Point => ({ x: u, y: v });
+  let complex = archetypePrior === "none" ? null : buildTerminal(districtRng.derive("morph"), role, archetypePrior, localFrame);
 
-  // Mega-hub parallel/satellite complexes go midfield between the banks when the
-  // largest bank gap can hold the apron (ATL/DEN pattern); otherwise outboard.
-  let midfieldGap: [number, number] | null = null;
-  const hasMixedRunwayFamilies = runways.some((runway) => isActive(runway) && Math.abs(runway.heading - heading) > 1);
-  if (complex && !hasMixedRunwayFamilies && role === "mega-hub" && (archetype === "parallel" || archetype === "satellite")) {
+  // Parallel/midfield complexes exist ONLY between the runway banks, concourse
+  // bars parallel to the runways (the ATL grammar). A site that cannot host the
+  // midfield apron downgrades to pier — outboard parallel ranks are never drawn.
+  // Mega-hub satellites also prefer the midfield gap (DEN pattern), outboard
+  // otherwise.
+  const fitGap = (): [number, number] | null => {
+    if (!complex) return null;
     const sorted = bankWs.slice().sort((one, two) => one - two);
     let best: [number, number] | null = null;
     for (let i = 0; i + 1 < sorted.length; i++) {
       if (!best || sorted[i + 1]! - sorted[i]! > best[1] - best[0]) best = [sorted[i]!, sorted[i + 1]!];
     }
-    if (best && complex.apronEdgeV / 2 + design.runwayTaxiwaySeparation + 150 <= (best[1] - best[0]) / 2) midfieldGap = best;
+    if (best && complex.apronEdgeV / 2 + design.runwayTaxiwaySeparation + 150 <= (best[1] - best[0]) / 2) return best;
+    return null;
+  };
+  let midfieldGap: [number, number] | null = null;
+  const hasMixedRunwayFamilies = runways.some((runway) => isActive(runway) && Math.abs(runway.heading - heading) > 1);
+  const midfieldEligible = complex !== null && !hasMixedRunwayFamilies && bankWs.length >= 2;
+  if (midfieldEligible && (complex!.family === "parallel" || (role === "mega-hub" && complex!.family === "satellite"))) {
+    midfieldGap = fitGap();
   }
+  if (complex && complex.family === "parallel" && !midfieldGap) {
+    complex = buildTerminal(districtRng.derive("morph"), role, "pier", localFrame);
+  }
+  const archetype = complex?.family ?? "none";
   const coreWEffective = midfieldGap ? (midfieldGap[0] + midfieldGap[1]) / 2 : coreW;
 
   // Only active runways carry runway protection zones. Zones are computed before
@@ -1083,6 +1155,9 @@ export function generate(seed: string, options: GenerateOptions = {}): SiteModel
     seed, identity, role, design, windHeading: heading, parcel, protectionZones: zones, runways,
     taxiways: taxi.taxiways, holdLines: taxi.holds, aprons: districts.aprons, buildings: safeBuildings,
     beacon,
+    terminal: districts.terminal,
+    stands: districts.stands,
+    taxilanes: districts.taxilanes,
     hotspots: deriveHotspots(runways, taxi.taxiways, role, layout.derive("hotspots")),
     lahso: deriveLahso(runways),
     frequencies, rampFrequencies: ramps, cautions, notes,
