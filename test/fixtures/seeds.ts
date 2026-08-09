@@ -79,8 +79,8 @@ export const fixtures: Fixture[] = [
     name: "arch-parallel",
     seed: "fixture-arch-parallel",
     options: { role: "major-hub", archetype: "parallel" },
-    why: "parallel midfield concourse ranks; RON ramps between bars",
-    summary: { role: "major-hub", archetype: "parallel", openRunways: 3, closedRunways: 0, headingFamilies: 1 },
+    why: "parallel midfield concourse ranks; RON ramps between bars; dotted future runway",
+    summary: { role: "major-hub", archetype: "parallel", openRunways: 3, closedRunways: 1, headingFamilies: 1 },
   },
   {
     name: "arch-satellite",

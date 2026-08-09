@@ -1,5 +1,4 @@
 export type Point = { x: number; y: number };
-export type Segment = { a: Point; b: Point };
 export type Polygon = Point[];
 export type Role = "basic-ga" | "business-ga" | "regional" | "mid-hub" | "major-hub" | "mega-hub";
 export type TerminalArchetype = "none" | "linear" | "pier" | "parallel" | "satellite" | "unit" | "semicircle";
@@ -37,6 +36,17 @@ export interface RunwayEnd {
   emas: number;
 }
 
+/** IAC 9 §3.5.2.2–3.5.2.4 pavement lifecycle states. Each state selects both a
+ * portrayal and the set of runway data retained on the sheet. */
+export type RunwayLifecycle =
+  | "active"
+  | "closed-indefinite" // still in the database: outline + X per end, data retained
+  | "under-construction" // runway record retained: outline + construction label
+  | "repurposed" // now taxiway/apron: screened pavement, no runway data
+  | "closed-permanent" // outline + one X per end, no designators or data
+  | "removed" // out of the database: screened pavement + repeated X's
+  | "new-construction"; // dotted outline only
+
 export interface Runway {
   id: string;
   center: Point;
@@ -45,7 +55,7 @@ export interface Runway {
   width: number;
   ends: [RunwayEnd, RunwayEnd];
   slope: number;
-  closed?: boolean;
+  lifecycle: RunwayLifecycle;
   centerlineLights: boolean;
   pcn: string;
 }
@@ -64,7 +74,6 @@ export interface Taxiway {
 export interface HoldLine {
   point: Point;
   angle: number;
-  taxiwayName: string;
   runwayId: string;
   kind?: "ils" | "cat2";
 }
@@ -108,6 +117,13 @@ export interface Frequency {
   partTime?: boolean;
 }
 
+/** Rotating beacon as a source fact: the tower/beacon collocation is recorded, not
+ * assumed, so `TWR/BCN` appears only when the beacon really sits on the tower. */
+export interface Beacon {
+  point: Point;
+  onTower: boolean;
+}
+
 export interface SiteModel {
   seed: string;
   identity: Identity;
@@ -121,6 +137,7 @@ export interface SiteModel {
   holdLines: HoldLine[];
   aprons: Apron[];
   buildings: Building[];
+  beacon: Beacon | null;
   hotspots: Hotspot[];
   lahso: LahsoMark[];
   frequencies: Frequency[];

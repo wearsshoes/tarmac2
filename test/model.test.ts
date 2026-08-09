@@ -18,7 +18,7 @@ describe("runway and taxiway invariants", () => {
     test(`${role} has valid runway and taxiway geometry`, () => {
       const model = generate(`property-${role}`, { role });
       const legal = /^[A-HJ-NP-WYZ](?:[1-9])?$/;
-      for (const runway of model.runways.filter((r) => !r.closed)) {
+      for (const runway of model.runways.filter((r) => r.lifecycle === "active")) {
         expect(Math.abs(((runway.ends[1].magneticHeading - runway.ends[0].magneticHeading + 360) % 360) - 180)).toBeLessThan(0.01);
         const [a, b] = runwayEndpoints(runway.center, runway.heading, runway.length);
         expect(Math.hypot(a.x - b.x, a.y - b.y)).toBeCloseTo(runway.length, 5);
@@ -26,7 +26,12 @@ describe("runway and taxiway invariants", () => {
         // contract is weaker (see todo below); keep the stronger check while true.
         expect(model.taxiways.some((t) => t.kind === "parallel" && t.runwayId === runway.id)).toBeTrue();
       }
-      for (const taxiway of model.taxiways.filter((t) => t.kind !== "apron-throat")) expect(taxiway.name).toMatch(legal);
+      // Identifier grammar applies to labeled taxiways; repair links and throat
+      // stubs are unlabeled service stubs with no name at all.
+      for (const taxiway of model.taxiways) {
+        if (taxiway.unlabeled) expect(taxiway.name).toBe("");
+        else if (taxiway.kind !== "apron-throat") expect(taxiway.name).toMatch(legal);
+      }
       expect(taxiwayComponents(model)).toBe(1);
     });
 
@@ -38,8 +43,18 @@ describe("runway and taxiway invariants", () => {
   test("field elevation is the highest point on a runway", () => {
     for (let i = 0; i < 40; i++) {
       const model = generate(`elev-${i}`);
-      const endElevations = model.runways.filter((r) => !r.closed).flatMap((r) => r.ends.map((e) => e.elevation));
+      const endElevations = model.runways.filter((r) => r.lifecycle === "active").flatMap((r) => r.ends.map((e) => e.elevation));
       expect(Math.max(...endElevations)).toBe(model.identity.elevation);
+    }
+  });
+
+  test("runway lifecycle is a valid enum value and non-active states stay rare and singular", () => {
+    const states = new Set(["active", "closed-indefinite", "under-construction", "repurposed", "closed-permanent", "removed", "new-construction"]);
+    for (let i = 0; i < 60; i++) {
+      const model = generate(`lifecycle-${i}`);
+      for (const runway of model.runways) expect(states.has(runway.lifecycle)).toBeTrue();
+      // Legacy fields draw at most one non-active runway (edit-plan decision 2).
+      expect(model.runways.filter((r) => r.lifecycle !== "active").length).toBeLessThanOrEqual(1);
     }
   });
 
@@ -63,7 +78,7 @@ describe("runway and taxiway invariants", () => {
 
   test("mega-hub banks renumber in chunks (LAX/ATL pattern)", () => {
     const model = generate("chunk-check", { role: "mega-hub" });
-    const bank = model.runways.filter((r) => !r.closed);
+    const bank = model.runways.filter((r) => r.lifecycle === "active");
     expect(bank.length).toBe(4);
     const numbers = new Set(bank.map((r) => Number.parseInt(r.ends[0].designator, 10)));
     expect(numbers.size).toBe(2);
@@ -76,7 +91,8 @@ describe("protection zones and hotspots", () => {
   test("RPZs are fully contained in the parcel (edges included)", () => {
     for (const fixture of fixtures) {
       const model = generate(fixture.seed, fixture.options);
-      expect(model.protectionZones.length).toBe(model.runways.length * 2);
+      // Only active runways carry protection zones.
+      expect(model.protectionZones.length).toBe(model.runways.filter((r) => r.lifecycle === "active").length * 2);
       for (const zone of model.protectionZones) {
         expect(polygonIsSane(zone)).toBeTrue();
         expect(polygonContained(zone, model.parcel)).toBeTrue();

@@ -10,7 +10,7 @@ export interface SemanticSummary {
 }
 
 export function semanticSummary(model: SiteModel): SemanticSummary {
-  const open = model.runways.filter((r) => !r.closed);
+  const open = model.runways.filter((r) => r.lifecycle === "active");
   return {
     role: model.role,
     archetype: model.terminalArchetype,

@@ -454,11 +454,14 @@ function fold(angle: number): number {
 interface FontScale { end: number; heading: number; dims: number; elev: number; twy: number; minor: number; blast: number; }
 
 function runwayLayer(model: SiteModel, projection: Projection, placer: LabelPlacer, fonts: FontScale): string {
-  let out = `<g id="runways">`;
+  // Non-active pavement (screened, outlined, dotted) draws beneath active bars so
+  // removed/future pavement passes under an active runway at crossings.
+  const under: string[] = [];
+  const over: string[] = [];
   model.runways.forEach((runway, index) => {
-    out += runwayShape(runway, index, projection, placer, fonts);
+    (runway.lifecycle === "active" ? over : under).push(runwayShape(runway, index, projection, placer, fonts));
   });
-  return `${out}</g>`;
+  return `<g id="runways">${under.join("")}${over.join("")}</g>`;
 }
 
 function runwayShape(runway: Runway, index: number, projection: Projection, placer: LabelPlacer, fonts: FontScale): string {
@@ -474,17 +477,62 @@ function runwayShape(runway: Runway, index: number, projection: Projection, plac
   const halfWidthPage = projection.distance(runway.width) / 2;
   let out = `<g id="runway-${esc(runway.id)}">`;
 
-  if (runway.closed) {
-    // Closed runway: open outline, X's along it, no designators (spec B4).
-    out += `<polygon points="${projection.polygon(body)}" fill="${WHITE}" class="thin"/>`;
-    const count = Math.max(2, Math.floor(projection.distance(runway.length) / 70));
-    for (let i = 0; i < count; i++) {
-      const c = projection.point(pointAlong(a, b, (i + 0.5) / count));
+  if (runway.lifecycle !== "active") {
+    // Lifecycle portrayal matrix (IAC 9 §3.5.2.2–3.5.2.4). Each state selects its
+    // geometry and which runway data survives on the sheet.
+    const xAt = (t: number): string => {
+      const c = projection.point(pointAlong(a, b, t));
       const r = Math.max(4, halfWidthPage * 1.3);
       const u = { x: dirAB.x * r, y: dirAB.y * r };
       const v = { x: sidePage.x * r, y: sidePage.y * r };
-      out += `<path d="M${num(c.x - u.x - v.x)} ${num(c.y - u.y - v.y)}L${num(c.x + u.x + v.x)} ${num(c.y + u.y + v.y)}M${num(c.x - u.x + v.x)} ${num(c.y - u.y + v.y)}L${num(c.x + u.x - v.x)} ${num(c.y + u.y - v.y)}" class="thin"/>`;
+      return `<path d="M${num(c.x - u.x - v.x)} ${num(c.y - u.y - v.y)}L${num(c.x + u.x + v.x)} ${num(c.y + u.y + v.y)}M${num(c.x - u.x + v.x)} ${num(c.y - u.y + v.y)}L${num(c.x + u.x - v.x)} ${num(c.y + u.y - v.y)}" class="thin"/>`;
+    };
+    const lengthPage = Math.max(1, projection.distance(runway.length));
+    const tEnd = Math.min(0.12, (Math.max(4, halfWidthPage * 1.3) * 1.6) / lengthPage);
+
+    if (runway.lifecycle === "repurposed") {
+      // Re-purposed as taxiway/apron: screened pavement identified by its new use.
+      out += `<polygon points="${projection.polygon(body)}" fill="${GRAY}" stroke="none"/>`;
+      return `${out}</g>`;
     }
+    if (runway.lifecycle === "removed") {
+      // Out of the runway database: screened pavement + repeated X's, no data.
+      out += `<polygon points="${projection.polygon(body)}" fill="${GRAY}" stroke="none"/>`;
+      const count = Math.max(2, Math.floor(lengthPage / 70));
+      for (let i = 0; i < count; i++) out += xAt((i + 0.5) / count);
+      return `${out}</g>`;
+    }
+    if (runway.lifecycle === "new-construction") {
+      // New runway under construction: dotted outline only.
+      out += `<polygon points="${projection.polygon(body)}" fill="none" class="dotted"/>`;
+      return `${out}</g>`;
+    }
+    // Outlined states: closed-permanent / closed-indefinite / under-construction.
+    out += `<polygon points="${projection.polygon(body)}" fill="${WHITE}" class="thin"/>`;
+    if (runway.lifecycle !== "under-construction") {
+      out += xAt(tEnd);
+      out += xAt(1 - tEnd);
+    }
+    if (runway.lifecycle === "closed-permanent") return `${out}</g>`;
+
+    // Retained data: end designators and a center state label.
+    runway.ends.forEach((end, endIndex) => {
+      if (!end.designator) return;
+      const endpoint = endIndex === 0 ? pa : pb;
+      const inward = endIndex === 0 ? dirAB : { x: -dirAB.x, y: -dirAB.y };
+      const rotation = (Math.atan2(inward.x, -inward.y) * 180) / Math.PI;
+      const candidates = [13, 26, 40, 58, 80].map((extra) => ({ x: endpoint.x - inward.x * extra, y: endpoint.y - inward.y * extra }));
+      const size = fonts.end - 2;
+      const p = candidates.find((candidate) => placer.claim(candidate, end.designator, size, rotation))
+        ?? placer.forceBest({ x: 0, y: 0 }, end.designator, size, candidates, rotation);
+      out += text(p.x, p.y + size * 0.36, end.designator, `class="runway-end halo" text-anchor="middle" transform="rotate(${num(rotation)} ${num(p.x)} ${num(p.y)})" font-size="${num(size)}"`);
+    });
+    const stateLabel = runway.lifecycle === "under-construction" ? "UNDER CONSTRUCTION" : "CLOSED";
+    const mid = projection.point(pointAlong(a, b, 0.5));
+    const stateCandidates = [0, 10, -10, 18, -18].map((d) => ({ x: mid.x + sidePage.x * d, y: mid.y + sidePage.y * d }));
+    const placedState = placer.try(mid, stateLabel, fonts.minor, stateCandidates.map((c) => ({ x: c.x - mid.x, y: c.y - mid.y })), foldedAngle);
+    const statePoint = placedState?.point ?? placer.forceBest(mid, stateLabel, fonts.minor, stateCandidates.map((c) => ({ x: c.x - mid.x, y: c.y - mid.y })), foldedAngle);
+    out += text(statePoint.x, statePoint.y, stateLabel, `class="minor halo" text-anchor="middle" transform="rotate(${num(foldedAngle)} ${num(statePoint.x)} ${num(statePoint.y)})" font-size="${fonts.minor}"`);
     return `${out}</g>`;
   }
 
@@ -516,7 +564,8 @@ function runwayShape(runway: Runway, index: number, projection: Projection, plac
     }
   });
 
-  // Displaced thresholds: white chevrons every 220 ft + white bar at the line.
+  // Displaced thresholds per Appendix 1: centerline arrows from the beginning of
+  // pavement leading to a solid transverse bar at the displaced threshold.
   runway.ends.forEach((end, endIndex) => {
     if (end.displaced <= 0) return;
     const endpoint = endIndex === 0 ? a : b;
@@ -526,11 +575,12 @@ function runwayShape(runway: Runway, index: number, projection: Projection, plac
     const sIn = { x: -dIn.y, y: dIn.x };
     const threshold = projection.point(add(endpoint, vscale(inward, end.displaced)));
     const w = halfWidthPage * 0.82;
-    out += `<path d="M${num(threshold.x - sIn.x * w)} ${num(threshold.y - sIn.y * w)}L${num(threshold.x + sIn.x * w)} ${num(threshold.y + sIn.y * w)}" stroke="${WHITE}" stroke-width="1.1"/>`;
-    const chevrons = Math.max(1, Math.floor(end.displaced / 220));
-    for (let k = 0; k < chevrons; k++) {
-      const c = projection.point(add(endpoint, vscale(inward, ((k + 0.5) / chevrons) * end.displaced)));
-      out += `<path d="M${num(c.x - dIn.x * 2.6 - sIn.x * 2.2)} ${num(c.y - dIn.y * 2.6 - sIn.y * 2.2)}L${num(c.x)} ${num(c.y)}L${num(c.x - dIn.x * 2.6 + sIn.x * 2.2)} ${num(c.y - dIn.y * 2.6 + sIn.y * 2.2)}" fill="none" stroke="${WHITE}" stroke-width=".7"/>`;
+    out += `<path d="M${num(threshold.x - sIn.x * w)} ${num(threshold.y - sIn.y * w)}L${num(threshold.x + sIn.x * w)} ${num(threshold.y + sIn.y * w)}" stroke="${WHITE}" stroke-width="1.3"/>`;
+    const arrows = Math.max(1, Math.floor(end.displaced / 300));
+    for (let k = 0; k < arrows; k++) {
+      const tail = projection.point(add(endpoint, vscale(inward, (k / arrows) * end.displaced + end.displaced * 0.08 / arrows)));
+      const head = projection.point(add(endpoint, vscale(inward, ((k + 0.86) / arrows) * end.displaced)));
+      out += `<path d="M${num(tail.x)} ${num(tail.y)}L${num(head.x)} ${num(head.y)}M${num(head.x - dIn.x * 2.4 + sIn.x * 1.8)} ${num(head.y - dIn.y * 2.4 + sIn.y * 1.8)}L${num(head.x)} ${num(head.y)}L${num(head.x - dIn.x * 2.4 - sIn.x * 1.8)} ${num(head.y - dIn.y * 2.4 - sIn.y * 1.8)}" fill="none" stroke="${WHITE}" stroke-width=".7"/>`;
     }
   });
 
@@ -628,8 +678,9 @@ function runwayShape(runway: Runway, index: number, projection: Projection, plac
   return `${out}</g>`;
 }
 
-/** Taxiway letters: repeat along long parallels, first label inset, checkerboard
- * side alternation, 3 candidates with drop-but-keep-≥1 policy (harvest H4/H7). */
+/** Taxiway letters: repeat along long parallels, set along the local path tangent
+ * (IAC 9), folded to ±90° so they never read upside-down; checkerboard side
+ * alternation with a drop-but-keep-≥1 policy (harvest H4/H7). */
 function taxiwayLabels(model: SiteModel, projection: Projection, placer: LabelPlacer, fonts: FontScale): string {
   let out = `<g id="taxiway-labels">`;
   model.taxiways.forEach((taxiway, twyIndex) => {
@@ -638,8 +689,9 @@ function taxiwayLabels(model: SiteModel, projection: Projection, placer: LabelPl
     const spacing = 2500;
     const count = taxiway.kind === "parallel" || taxiway.kind === "service" ? Math.max(1, Math.round(pathLength / spacing)) : 1;
     let placedAny = false;
-    const candidatesAt = (preferredT: number, preferredSide: number): Point[] => {
-      const candidates: Point[] = [];
+    type Candidate = { point: Point; angle: number };
+    const candidatesAt = (preferredT: number, preferredSide: number): Candidate[] => {
+      const candidates: Candidate[] = [];
       const stations = [preferredT, ...Array.from({ length: 19 }, (_, index) => 0.05 + index * 0.05)]
         .map((station) => Math.max(0.04, Math.min(0.96, station)))
         .sort((one, two) => Math.abs(one - preferredT) - Math.abs(two - preferredT));
@@ -648,33 +700,37 @@ function taxiwayLabels(model: SiteModel, projection: Projection, placer: LabelPl
         const after = projection.point(pointOnPolyline(taxiway.points, Math.min(1, t + 0.01)));
         const length = Math.hypot(after.x - before.x, after.y - before.y) || 1;
         const normal = { x: -(after.y - before.y) / length, y: (after.x - before.x) / length };
+        // The identifier sets along the local tangent at its own station.
+        const angle = fold((Math.atan2(after.y - before.y, after.x - before.x) * 180) / Math.PI);
         const anchor = projection.point(pointOnPolyline(taxiway.points, t));
         for (const side of [preferredSide, -preferredSide]) for (const distance of [5.5, 9, 13, 18, 24, 30, 36, 42]) {
-          candidates.push({ x: anchor.x + normal.x * side * distance, y: anchor.y + normal.y * side * distance });
+          candidates.push({ point: { x: anchor.x + normal.x * side * distance, y: anchor.y + normal.y * side * distance }, angle });
         }
       }
       return candidates;
     };
+    const label = (candidate: Candidate, size: number): string =>
+      text(candidate.point.x, candidate.point.y, taxiway.name,
+        `class="twy halo" text-anchor="middle" transform="rotate(${num(candidate.angle)} ${num(candidate.point.x)} ${num(candidate.point.y)})" font-size="${num(size)}"`);
     for (let i = 0; i < count; i++) {
       const t = count === 1 ? 0.5 : (0.6 * spacing + i * ((pathLength - 1.2 * spacing) / Math.max(1, count - 1))) / pathLength;
       const side = (i + twyIndex) % 2 === 0 ? 1 : -1;
       const candidates = candidatesAt(Math.max(0.05, Math.min(0.95, t)), side);
-      let chosenSize = fonts.twy;
-      let point: Point | undefined;
       for (const size of [fonts.twy, fonts.twy - 0.7, fonts.twy - 1.2, Math.max(4.6, fonts.twy - 1.7)]) {
-        point = candidates.find((candidate) => placer.claim(candidate, taxiway.name, size));
-        if (point) { chosenSize = size; break; }
-      }
-      if (point) {
-        out += text(point.x, point.y, taxiway.name, `class="twy halo" text-anchor="middle" font-size="${num(chosenSize)}"`);
-        placedAny = true;
+        const found = candidates.find((candidate) => placer.claim(candidate.point, taxiway.name, size, candidate.angle));
+        if (found) {
+          out += label(found, size);
+          placedAny = true;
+          break;
+        }
       }
     }
     if (!placedAny) {
       const candidates = candidatesAt(0.5, twyIndex % 2 === 0 ? 1 : -1);
       const fallbackSize = Math.max(4.6, fonts.twy - 1.7);
-      const p = placer.forceBest({ x: 0, y: 0 }, taxiway.name, fallbackSize, candidates);
-      out += text(p.x, p.y, taxiway.name, `class="twy halo" text-anchor="middle" font-size="${num(fallbackSize)}"`);
+      const angle = candidates[0]?.angle ?? 0;
+      const p = placer.forceBest({ x: 0, y: 0 }, taxiway.name, fallbackSize, candidates.map((c) => c.point), angle);
+      out += label({ point: p, angle }, fallbackSize);
     }
   });
   return `${out}</g>`;
@@ -730,6 +786,9 @@ function buildingsLayer(model: SiteModel, projection: Projection, placer: LabelP
   }
   out += `</g><g id="building-labels" class="thin">`;
 
+  // Tower and beacon are independent facts: the star and the BCN line appear with
+  // the tower only when the model records collocation.
+  const beaconOnTower = model.beacon?.onTower ?? false;
   for (const building of model.buildings) {
     if (building.unlabeled) continue;
     const anchor = projection.point(areaCentroid(building.polygon));
@@ -737,10 +796,10 @@ function buildingsLayer(model: SiteModel, projection: Projection, placer: LabelP
       const label = `TWR ${towerElevation(model)}`;
       const candidates = RING.map((o) => ({ x: o.x * 1.4, y: o.y * 1.2 }));
       const placed = placer.try(anchor, label, fonts.minor, candidates) ?? { point: placer.forceBest(anchor, label, fonts.minor, candidates), leader: true };
-      out += star(anchor.x, anchor.y - 7, 4.6);
+      if (beaconOnTower) out += star(anchor.x, anchor.y - 7, 4.6);
       if (placed.leader) out += leaderPath(placer, anchor, { x: placed.point.x, y: placed.point.y + 2 });
       out += text(placed.point.x, placed.point.y, label, `class="minor halo" text-anchor="middle" font-size="${fonts.minor}"`);
-      out += text(placed.point.x, placed.point.y + fonts.minor + 1, "BCN", `class="minor halo" text-anchor="middle" font-size="${fonts.minor}"`);
+      if (beaconOnTower) out += text(placed.point.x, placed.point.y + fonts.minor + 1, "BCN", `class="minor halo" text-anchor="middle" font-size="${fonts.minor}"`);
       continue;
     }
     // Building labels drop entirely on collision (tiered policy) — but try a ring first.
@@ -750,11 +809,21 @@ function buildingsLayer(model: SiteModel, projection: Projection, placer: LabelP
     out += text(placed.point.x, placed.point.y, building.label, `class="minor halo" text-anchor="middle" font-size="${fonts.minor}"`);
   }
 
-  // Apron labels never drop: force candidate 0 + leader when needed.
+  // Standalone rotating beacon: star symbol + BCN label away from the tower.
+  if (model.beacon && !model.beacon.onTower) {
+    const p = projection.point(model.beacon.point);
+    out += `<g id="beacon">`;
+    out += star(p.x, p.y, 4.6);
+    const placed = placer.try(p, "BCN", fonts.minor, RING.map((o) => ({ x: o.x * 1.2, y: o.y * 1.2 })));
+    if (placed) out += text(placed.point.x, placed.point.y, "BCN", `class="minor halo" text-anchor="middle" font-size="${fonts.minor}"`);
+    out += `</g>`;
+  }
+
+  // Apron labels never drop: widening rings of candidates, then force + leader.
   for (const apron of model.aprons) {
     if (!apron.label) continue;
     const anchor = projection.point(areaCentroid(apron.polygon));
-    const candidates = RING.map((o) => ({ x: o.x * 2, y: o.y * 1.8 }));
+    const candidates = [[2, 1.8], [2.9, 2.6], [3.9, 3.5]].flatMap(([fx, fy]) => RING.map((o) => ({ x: o.x * fx!, y: o.y * fy! })));
     const placed = placer.try(anchor, apron.label, fonts.minor, candidates);
     const point = placed?.point ?? placer.forceBest(anchor, apron.label, fonts.minor, candidates);
     if (placed?.leader || !placed) out += leaderPath(placer, anchor, { x: point.x, y: point.y + 2 });
@@ -871,7 +940,7 @@ function furniturePlan(model: SiteModel, projection: Projection): FurniturePlan 
 
   const magVar = packer.place(180, 126, ["bottom-right", "bottom-left", "center-right", "center-left"]);
 
-  const pcnLines = model.runways.filter((runway) => !runway.closed && runway.pcn).map((runway) => `RWY ${runway.id}  ${runway.pcn}`);
+  const pcnLines = model.runways.filter((runway) => runway.lifecycle === "active" && runway.pcn).map((runway) => `RWY ${runway.id}  ${runway.pcn}`);
   const pcnW = Math.max(170, ...pcnLines.map((line) => textWidth(line, 7) + 10));
   const pcnH = Math.max(20, pcnLines.length * 10 + 8);
   const pcn = packer.place(pcnW, pcnH, ["bottom-left", "bottom-right", "center-left", "center-right", "top-left"]);
@@ -908,10 +977,29 @@ function commBlock(model: SiteModel, placement: Placement): string {
   return `${out}</g>`;
 }
 
-function fieldElevBox(model: SiteModel, placement: Placement): string {
+/** FIELD ELEV box with a dot + leader to the known runway high point (the primary
+ * end whose elevation equals the field elevation). */
+function fieldElevBox(model: SiteModel, placement: Placement, projection: Projection, placer: LabelPlacer): string {
   const label = `FIELD ELEV ${model.identity.elevation}`;
-  return `<g id="field-elevation" data-layout-slot="${placement.slot}"><rect x="${num(placement.x)}" y="${num(placement.y)}" width="${num(placement.w)}" height="21" fill="${WHITE}" class="thin"/>` +
-    text(placement.x + placement.w / 2, placement.y + 14, label, `class="small" text-anchor="middle"`) + `</g>`;
+  let out = `<g id="field-elevation" data-layout-slot="${placement.slot}"><rect x="${num(placement.x)}" y="${num(placement.y)}" width="${num(placement.w)}" height="21" fill="${WHITE}" class="thin"/>` +
+    text(placement.x + placement.w / 2, placement.y + 14, label, `class="small" text-anchor="middle"`);
+  const primary = model.runways.find((r) => r.lifecycle === "active");
+  if (primary) {
+    const high = primary.ends[0].elevation >= primary.ends[1].elevation ? 0 : 1;
+    const [a, b] = runwayEndpoints(primary.center, primary.heading, primary.length);
+    const dot = projection.point(pointAlong(a, b, high === 0 ? 0.02 : 0.98));
+    // Leader leaves the box edge nearest the dot.
+    const fromX = dot.x < placement.x ? placement.x : dot.x > placement.x + placement.w ? placement.x + placement.w : placement.x + placement.w / 2;
+    const fromY = fromX === placement.x || fromX === placement.x + placement.w
+      ? placement.y + 10
+      : dot.y < placement.y ? placement.y : placement.y + 21;
+    // The leader draws beneath later labels and reserves nothing: it may cross the
+    // airfield to reach the high point, exactly like the published charts.
+    const points = placer.leaderPath({ x: fromX, y: fromY }, dot);
+    out += `<path d="${points.map((point, index) => `${index ? "L" : "M"}${num(point.x)} ${num(point.y)}`).join("")}" class="thin"/>`;
+    out += `<circle cx="${num(dot.x)}" cy="${num(dot.y)}" r="1.7" fill="${BLACK}" stroke="${WHITE}" stroke-width=".8"/>`;
+  }
+  return `${out}</g>`;
 }
 
 /** Mag-var assembly (harvest H7): filled true-north head, open-V magnetic head,
@@ -945,7 +1033,7 @@ function magVar(model: SiteModel, projection: Projection, placement: Placement):
 function bottomBlocks(model: SiteModel, plan: FurniturePlan): string {
   let out = `<g id="bottom-blocks">`;
   // Each text/table block is independently packed into available whitespace.
-  const pcnLines = model.runways.filter((r) => !r.closed && r.pcn).map((r) => `RWY ${r.id}  ${r.pcn}`);
+  const pcnLines = model.runways.filter((r) => r.lifecycle === "active" && r.pcn).map((r) => `RWY ${r.id}  ${r.pcn}`);
   let y = plan.pcn.y + 10;
   out += `<g id="pcn-block" data-layout-slot="${plan.pcn.slot}">`;
   for (const line of pcnLines) { out += text(plan.pcn.x + 4, y, line, `class="minor halo"`); y += 10; }
@@ -987,6 +1075,10 @@ function bottomBlocks(model: SiteModel, plan: FurniturePlan): string {
   return `${out}</g>`;
 }
 
+/** Margin topology per IAC 9 (real-diagram-features §1): top-left Julian revision
+ * date stacked above the large title, AL-nnn centered top-only, top-right name (ID)
+ * over city/state; bottom-left repeats the title with the Julian date below;
+ * bottom-right shows city/state above name (ID). */
 function margins(model: SiteModel): string {
   const { identity: id } = model;
   const right = `${id.airportName} (${id.id})`;
@@ -995,9 +1087,8 @@ function margins(model: SiteModel): string {
     text(40, 24, model.chartNumber, `class="micro"`) + text(40, 42, "AIRPORT DIAGRAM", `class="title"`) +
     text(W / 2, 37, model.alNumber, `class="margin" text-anchor="middle"`) +
     text(860, 28, right, `class="margin" text-anchor="end"`) + text(860, 42, city, `class="small" text-anchor="end"`) +
-    text(40, 1160, city, `class="small"`) + text(40, 1175, right, `class="margin"`) +
-    text(W / 2, 1172, model.alNumber, `class="margin" text-anchor="middle"`) + text(860, 1158, model.chartNumber, `class="micro" text-anchor="end"`) +
-    text(860, 1178, "AIRPORT DIAGRAM", `class="title" text-anchor="end"`) +
+    text(40, 1163, "AIRPORT DIAGRAM", `class="title"`) + text(40, 1178, model.chartNumber, `class="micro"`) +
+    text(860, 1163, city, `class="small" text-anchor="end"`) + text(860, 1178, right, `class="margin" text-anchor="end"`) +
     text(17, H / 2, model.cycle, `class="micro" text-anchor="middle" transform="rotate(-90 17 ${H / 2})"`) +
     text(883, H / 2, model.cycle, `class="micro" text-anchor="middle" transform="rotate(90 883 ${H / 2})"`) + `</g>`;
 }
@@ -1023,7 +1114,7 @@ export function render(model: SiteModel): string {
   const furnitureBoxes = [furniture.comm, furniture.fieldElev, furniture.magVar, furniture.caution, furniture.pcn, furniture.notes, furniture.ramp].filter((box): box is Placement => Boolean(box));
   for (const box of furnitureBoxes) placer.reserve(inflate(box, 4));
   const comm = commBlock(model, furniture.comm);
-  const fieldElev = fieldElevBox(model, furniture.fieldElev);
+  const fieldElev = fieldElevBox(model, furniture.fieldElev, projection, placer);
   const magvar = magVar(model, projection, furniture.magVar);
   const bottom = bottomBlocks(model, furniture);
 
@@ -1057,6 +1148,7 @@ export function render(model: SiteModel): string {
     `.hdg,.dims,.elev,.twy,.minor,.blast{letter-spacing:.04em}` +
     `.thin{stroke:${BLACK};stroke-width:.52;fill:none}.halo{paint-order:stroke;stroke:${WHITE};stroke-width:2.6px;stroke-linejoin:round}` +
     `.centerlights{fill:none;stroke:${WHITE};stroke-width:.85;stroke-dasharray:.9 3.6;stroke-linecap:butt}` +
+    `.dotted{stroke:${BLACK};stroke-width:.52;stroke-dasharray:.6 2.2;stroke-linecap:round}` +
     `.hotspot{stroke-width:1.2}.hot-text{font-size:7px;letter-spacing:.03em}.underline{text-decoration:underline}` +
     `</style><clipPath id="plot-clip"><rect x="${FRAME.x + 1}" y="${FRAME.y + 1}" width="${FRAME.w - 2}" height="${FRAME.h - 2}"/></clipPath></defs>` +
     `<rect width="${W}" height="${H}" fill="${WHITE}"/>${margins(model)}<rect x="${FRAME.x}" y="${FRAME.y}" width="${FRAME.w}" height="${FRAME.h}" fill="none" stroke="${BLACK}" stroke-width="1.04"/>` +

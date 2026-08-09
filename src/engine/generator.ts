@@ -2,7 +2,10 @@ import { RNG } from "./rng";
 import { add, perp, pointAlong, pointInPolygon, pointSegmentDistance, polar, polylineDistance, rect, runwayEndpoints, scale, segmentIntersection, sub } from "./geometry";
 import { makeIdentity } from "./identity";
 import { buildTerminal, type TerminalComplex } from "./terminal";
-import type { Apron, Building, DesignCode, Frequency, GenerateOptions, HoldLine, Hotspot, Identity, LahsoMark, Point, Role, Runway, RunwayEnd, SiteModel, Taxiway, TerminalArchetype } from "./types";
+import type { Apron, Beacon, Building, DesignCode, Frequency, GenerateOptions, HoldLine, Hotspot, Identity, LahsoMark, Point, Role, Runway, RunwayEnd, RunwayLifecycle, SiteModel, Taxiway, TerminalArchetype } from "./types";
+
+/** Only active runways get taxiway service, hotspots, LAHSO, and RPZs. */
+const isActive = (runway: Runway): boolean => runway.lifecycle === "active";
 
 const ROLES: Role[] = ["basic-ga", "business-ga", "regional", "mid-hub", "major-hub", "mega-hub"];
 const TAXI_LETTERS = "ABCDEFGHJKLMNPQRSTUVWYZ".split("");
@@ -127,7 +130,7 @@ function buildTaxiways(rng: RNG, runways: Runway[], role: Role, design: DesignCo
   const routes: TaxiRoute[] = [];
   const holds: HoldLine[] = [];
   const hub = role.includes("hub");
-  const open = runways.filter((r) => !r.closed);
+  const open = runways.filter(isActive);
 
   open.forEach((runway, runwayIndex) => {
     const [a, b] = runwayEndpoints(runway.center, runway.heading, runway.length);
@@ -177,7 +180,7 @@ function buildTaxiways(rng: RNG, runways: Runway[], role: Role, design: DesignCo
         points: [runwayPoint, taxiPoint], parentRoute: parallelIndex,
         connectorStation: canonical > 0 ? t : 1 - t,
       });
-      holds.push({ point: add(runwayPoint, scale(runLateral, side * design.holdDistance)), angle: runway.heading, taxiwayName: "", runwayId: runway.id, kind: design.visibility === "1200" && (t < 0.05 || t > 0.95) ? "ils" : undefined });
+      holds.push({ point: add(runwayPoint, scale(runLateral, side * design.holdDistance)), angle: runway.heading, runwayId: runway.id, kind: design.visibility === "1200" && (t < 0.05 || t > 0.95) ? "ils" : undefined });
     });
 
     // High-speed exits: 30° off, starting 58–68% down in the landing direction,
@@ -270,7 +273,8 @@ function repairConnectivity(taxiways: Taxiway[], width: number): void {
       }
     }
     if (!best) return;
-    taxiways.push({ id: `repair-${pass}`, name: `Z${Math.min(9, pass + 1)}`, points: [best.a, best.b], width, kind: "service", unlabeled: false });
+    // Repair links are unlabeled service stubs, never lettered taxiways.
+    taxiways.push({ id: `repair-${pass}`, name: "", points: [best.a, best.b], width, kind: "service", unlabeled: true });
   }
 }
 
@@ -302,8 +306,9 @@ function buildDistricts(rng: RNG, role: Role, archetype: TerminalArchetype, head
   const throats: Taxiway[] = [];
   const wAt = (w: number) => side * w;
   const uSpread = primaryLength / 2;
-  const open = runways.filter((r) => !r.closed);
-  const clearOfRunways = (polygon: Point[], margin: number): boolean => open.every((r) => {
+  // Clearance considers every runway with visible pavement, including non-active
+  // states and dotted future outlines — districts must not sit on any of them.
+  const clearOfRunways = (polygon: Point[], margin: number): boolean => runways.every((r) => {
       const [ra, rb] = runwayEndpoints(r.center, r.heading, r.length);
       const clearance = margin + r.width / 2;
       if (polygon.some((point) => pointSegmentDistance(point, ra, rb) < clearance)) return false;
@@ -470,7 +475,7 @@ function buildDistricts(rng: RNG, role: Role, archetype: TerminalArchetype, head
     const u0 = i === 0 ? (terminalSpanU[0] + terminalSpanU[1]) / 2 + rng.float(-500, 500) : rng.pick([-1, 1]) * rng.float(0.3, 0.6) * uSpread;
     const towerW = side * (networkW + 600 + rng.float(0, 300));
     const u = slide([u0, u0 + 700, u0 - 700, u0 + 1400, u0 - 1400], (candidate) => rect(at(candidate, towerW), 90, 90, -heading), 420);
-    buildings.push({ id: `tower-${i}`, kind: "tower", label: "TWR/BCN", unlabeled: i > 0, polygon: rect(at(u, towerW), 90, 90, -heading) });
+    buildings.push({ id: `tower-${i}`, kind: "tower", label: "TWR", unlabeled: i > 0, polygon: rect(at(u, towerW), 90, 90, -heading) });
   }
 
   // Overflow apron named by compass position.
@@ -505,7 +510,7 @@ function enforceBuildingFreeZones(buildings: Building[], zones: Point[][], headi
 
 /** Hotspot derivation per harvest H4: risk-scored candidates with 500-ft suppression. */
 function deriveHotspots(runways: Runway[], taxiways: Taxiway[], role: Role, rng: RNG): Hotspot[] {
-  const open = runways.filter((r) => !r.closed);
+  const open = runways.filter(isActive);
   type Candidate = { point: Point; risk: number; angle: number; reason: string; elongation: number };
   const candidates: Candidate[] = [];
   for (let i = 0; i < open.length; i++) for (let j = i + 1; j < open.length; j++) {
@@ -545,7 +550,7 @@ function deriveHotspots(runways: Runway[], taxiways: Taxiway[], role: Role, rng:
 
 /** LAHSO derivation per harvest H6 (deterministic). */
 function deriveLahso(runways: Runway[]): LahsoMark[] {
-  const open = runways.filter((r) => !r.closed);
+  const open = runways.filter(isActive);
   const marks: LahsoMark[] = [];
   for (const runway of open) {
     if (runway.length < 8000) continue;
@@ -567,6 +572,20 @@ function deriveLahso(runways: Runway[]): LahsoMark[] {
     }
   }
   return marks.slice(0, 6);
+}
+
+const MONTH_INDEX: Record<string, number> = { JAN: 0, FEB: 1, MAR: 2, APR: 3, MAY: 4, JUN: 5, JUL: 6, AUG: 7, SEP: 8, OCT: 9, NOV: 10, DEC: 11 };
+
+/** Julian revision date (YYDDD) derived from the cycle's effectivity start, so the
+ * top-margin number is always a valid day-of-year that agrees with the side dates. */
+function julianDate(cycle: string): string {
+  const match = cycle.match(/(\d{2}) ([A-Z]{3}) (\d{4})/);
+  if (!match) return "24001";
+  const [, day, month, year] = match;
+  const y = Number(year);
+  const start = Date.UTC(y, MONTH_INDEX[month!] ?? 0, Number(day));
+  const dayOfYear = Math.round((start - Date.UTC(y, 0, 1)) / 86400000) + 1;
+  return `${String(y % 100).padStart(2, "0")}${String(dayOfYear).padStart(3, "0")}`;
 }
 
 /** fmtFreq per harvest H6: 2 dp, dropping to 1 dp when the hundredths digit is 0. */
@@ -597,7 +616,7 @@ function buildFrequencies(role: Role, rng: RNG, city: string, runways: Runway[],
     const half = Math.ceil(runways.length / 2);
     const chunks = [runways.slice(0, half), runways.slice(half)];
     sectors.forEach((sector, i) => {
-      const list = chunks[i]!.filter((r) => !r.closed).map((r) => `RWY ${r.id}`).join(", ");
+      const list = chunks[i]!.filter(isActive).map((r) => `RWY ${r.id}`).join(", ");
       if (list) rows.push({ label: `${cityCaps} TOWER ${sector}`, value: draw(118, 128.95), detail: `(${list})` });
     });
   } else {
@@ -671,7 +690,7 @@ export function generate(seed: string, options: GenerateOptions = {}): SiteModel
           id: `${ends[0].designator}-${ends[1].designator}`,
           center: add(origin, familyFrame.at(slot.u, slot.w)), heading: familyHeading, length,
           width: widthFor(length, familyName === "primary" && slot.lengthScale === 1),
-          ends, slope: 0,
+          ends, slope: 0, lifecycle: "active",
           centerlineLights: design.visibility === "1200" && runwayRng.chance(0.75),
           pcn: pcnString(length, numbers.derive(`pcn-${runwayKey}`)),
         });
@@ -710,31 +729,59 @@ export function generate(seed: string, options: GenerateOptions = {}): SiteModel
     runways.push({
       id: `${ends[0].designator}-${ends[1].designator}`,
       center, heading: crossHeading, length: crossLength,
-      width: widthFor(crossLength, false), ends, slope: 0,
+      width: widthFor(crossLength, false), ends, slope: 0, lifecycle: "active",
       centerlineLights: false, pcn: pcnString(crossLength, numbers.derive("pcn-cross")),
     });
   }
 
-  // Closed former runway at legacy fields — never the primary.
+  // Non-active former runway at legacy fields — never the primary. The lifecycle
+  // state is drawn from a derived stream so it selects portrayal + retained data
+  // without disturbing the layout draws.
   const legacyRng = layout.derive("legacy");
   if ((role === "regional" || role === "business-ga") && !wantsCross && legacyRng.chance(0.16)) {
     const delta = legacyRng.pick([1, -1]) * legacyRng.float(40, 85);
     const closedHeading = ((heading + delta) % 360 + 360) % 360;
     const closedLength = snap(primaryLength * legacyRng.float(0.5, 0.7), 50);
     const center = at(legacyRng.pick([1, -1]) * legacyRng.float(0.22, 0.34) * primaryLength, legacyRng.float(-400, 400));
+    const lifecycle = legacyRng.derive("lifecycle").weighted<RunwayLifecycle>([
+      ["closed-permanent", 0.4], ["removed", 0.3], ["closed-indefinite", 0.2], ["repurposed", 0.1],
+    ]);
+    // Indefinitely closed runways stay in the database and keep their end data.
+    const keepsData = lifecycle === "closed-indefinite";
+    const number = runwayNumber(closedHeading, identity.variation);
+    const ends = keepsData
+      ? makeEnds(legacyRng.derive("ends"), identity, closedHeading, number, "", false)
+      : ([
+        { designator: "", elevation: identity.elevation, magneticHeading: 0, displaced: 0, blastPad: 0, emas: 0 },
+        { designator: "", elevation: identity.elevation, magneticHeading: 0, displaced: 0, blastPad: 0, emas: 0 },
+      ] as [RunwayEnd, RunwayEnd]);
     runways.push({
       id: `closed-${runways.length}`, center, heading: closedHeading, length: closedLength, width: 75,
+      ends, slope: 0, lifecycle, centerlineLights: false, pcn: "",
+    });
+  }
+
+  // Growing hubs occasionally chart a future parallel as a dotted new-construction
+  // outline, outboard of the far bank (derived stream: no layout draws consumed).
+  const expansionRng = layout.derive("expansion");
+  if (hub && !runways.some((r) => !isActive(r)) && expansionRng.chance(0.07)) {
+    const bankWsAll = runways.filter((r) => isActive(r) && Math.abs(((r.heading - heading) % 360)) < 1).map((r) => r.center.x * perp(polar(heading)).x + r.center.y * perp(polar(heading)).y);
+    const w = Math.min(...bankWsAll) - expansionRng.pick([2500, 3400]);
+    const length = snap(primaryLength * expansionRng.float(0.85, 1), 50);
+    runways.push({
+      id: `future-${runways.length}`, center: at(expansionRng.float(-0.06, 0.06) * primaryLength, w),
+      heading, length, width: 150,
       ends: [
         { designator: "", elevation: identity.elevation, magneticHeading: 0, displaced: 0, blastPad: 0, emas: 0 },
         { designator: "", elevation: identity.elevation, magneticHeading: 0, displaced: 0, blastPad: 0, emas: 0 },
       ],
-      slope: 0, closed: true, centerlineLights: false, pcn: "",
+      slope: 0, lifecycle: "new-construction", centerlineLights: false, pcn: "",
     });
   }
 
   // Field elevation = highest point on a runway: force it onto the primary's higher end.
   for (const runway of runways) {
-    if (runway.closed) continue;
+    if (!isActive(runway)) continue;
     runway.slope = Math.round(Math.abs(runway.ends[0].elevation - runway.ends[1].elevation) / runway.length * 1000) / 10;
   }
   const primary = runways[0]!;
@@ -745,7 +792,7 @@ export function generate(seed: string, options: GenerateOptions = {}): SiteModel
   // --- Districts & taxiways ---
   const districtRng = layout.derive("districts");
   const side = districtRng.pick([1, -1]);
-  const bankWs = runways.filter((r) => !r.closed && Math.abs(((r.heading - heading) % 360)) < 1).map((r) => r.center.x * lateral.x + r.center.y * lateral.y);
+  const bankWs = runways.filter((r) => isActive(r) && Math.abs(((r.heading - heading) % 360)) < 1).map((r) => r.center.x * lateral.x + r.center.y * lateral.y);
   const outerBankW = side > 0 ? Math.max(...bankWs) : -Math.min(...bankWs);
   const networkW = outerBankW + design.runwayTaxiwaySeparation + (hub ? 400 : 0);
   const outerW = networkW + 120;
@@ -757,7 +804,7 @@ export function generate(seed: string, options: GenerateOptions = {}): SiteModel
   // Mega-hub parallel/satellite complexes go midfield between the banks when the
   // largest bank gap can hold the apron (ATL/DEN pattern); otherwise outboard.
   let midfieldGap: [number, number] | null = null;
-  const hasMixedRunwayFamilies = runways.some((runway) => !runway.closed && Math.abs(runway.heading - heading) > 1);
+  const hasMixedRunwayFamilies = runways.some((runway) => isActive(runway) && Math.abs(runway.heading - heading) > 1);
   if (complex && !hasMixedRunwayFamilies && role === "mega-hub" && (archetype === "parallel" || archetype === "satellite")) {
     const sorted = bankWs.slice().sort((one, two) => one - two);
     let best: [number, number] | null = null;
@@ -774,7 +821,8 @@ export function generate(seed: string, options: GenerateOptions = {}): SiteModel
   repairConnectivity(taxi.taxiways, design.taxiwayWidth);
 
   // --- Parcel: hull of everything + margin, with clipped corners ---
-  const zones = protectionZones(runways, design.visibility === "1200");
+  // Only active runways carry runway protection zones.
+  const zones = protectionZones(runways.filter(isActive), design.visibility === "1200");
   const contentPoints: Point[] = [
     ...runways.flatMap((r) => runwayEndpoints(r.center, r.heading, r.length)),
     ...zones.flat(),
@@ -798,11 +846,33 @@ export function generate(seed: string, options: GenerateOptions = {}): SiteModel
   const safeBuildings = enforceBuildingFreeZones(districts.buildings, zones, heading);
   const { frequencies, ramps } = buildFrequencies(role, numbers.derive("freqs"), identity.city, runways, heading);
 
+  // Beacon as a source fact: usually on the tower; otherwise a standalone site on
+  // the landside belt, slid along the axis until it clears every runway corridor.
+  const beaconRng = layout.derive("beacon");
+  const tower = safeBuildings.find((b) => b.kind === "tower");
+  let beacon: Beacon | null = null;
+  if (tower) {
+    const centroid = tower.polygon.reduce((sum, p) => ({ x: sum.x + p.x / tower.polygon.length, y: sum.y + p.y / tower.polygon.length }), { x: 0, y: 0 });
+    if (beaconRng.chance(0.65)) beacon = { point: centroid, onTower: true };
+    else {
+      const clearOfAll = (p: Point): boolean => runways.every((r) => {
+        const [ra, rb] = runwayEndpoints(r.center, r.heading, r.length);
+        return pointSegmentDistance(p, ra, rb) > 600 + r.width / 2;
+      });
+      const beltW = networkW + 1400 + beaconRng.float(0, 400);
+      const site = [0.35, -0.35, 0.55, -0.55, 0.75, -0.75]
+        .map((f) => at(f * primaryLength / 2, side * beltW))
+        .find(clearOfAll);
+      beacon = site ? { point: site, onTower: false } : { point: centroid, onTower: true };
+    }
+  }
+
+  const closedStates = new Set<RunwayLifecycle>(["closed-indefinite", "closed-permanent", "removed"]);
   const cautions = [
     "CAUTION: BE ALERT TO RUNWAY CROSSING CLEARANCES.",
     "READBACK OF ALL RUNWAY HOLDING INSTRUCTIONS IS REQUIRED.",
   ];
-  if (runways.some((r) => r.closed)) cautions.push("CAUTION: CLOSED RWY NOT AVBL FOR LDG OR DEP.");
+  if (runways.some((r) => closedStates.has(r.lifecycle))) cautions.push("CAUTION: CLOSED RWY NOT AVBL FOR LDG OR DEP.");
   const notes: string[] = [];
   if (hub) notes.push("ASDE-X SURVEILLANCE SYSTEM IN USE.");
   if ((role === "major-hub" || role === "mega-hub") && numbers.chance(0.6)) notes.push("RUNWAY STATUS LIGHTS IN OPERATION.");
@@ -810,11 +880,12 @@ export function generate(seed: string, options: GenerateOptions = {}): SiteModel
   return {
     seed, identity, role, design, windHeading: heading, parcel, protectionZones: zones, runways,
     taxiways: taxi.taxiways, holdLines: taxi.holds, aprons: districts.aprons, buildings: safeBuildings,
+    beacon,
     hotspots: deriveHotspots(runways, taxi.taxiways, role, layout.derive("hotspots")),
     lahso: deriveLahso(runways),
     frequencies, rampFrequencies: ramps, cautions, notes,
     terminalArchetype: archetype,
-    chartNumber: String(numbers.int(10037, 99999)), alNumber: `AL-${numbers.int(1, 999)} (FAA)`,
+    chartNumber: julianDate(identity.cycle), alNumber: `AL-${numbers.int(1, 999)} (FAA)`,
     cycle: identity.cycle,
   };
 }

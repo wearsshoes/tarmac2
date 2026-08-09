@@ -15,7 +15,7 @@ describe("population", () => {
     for (let i = 0; i < SWEEP; i++) {
       const model = generate(`population-${i}`);
       expect(new Set(model.runways.map((runway) => runway.id)).size).toBe(model.runways.length);
-      expect(model.protectionZones.length).toBe(model.runways.length * 2);
+      expect(model.protectionZones.length).toBe(model.runways.filter((runway) => runway.lifecycle === "active").length * 2);
       for (const zone of model.protectionZones) {
         for (const point of zone) expect(pointInPolygon(point, model.parcel)).toBeTrue();
         for (const building of model.buildings) {
@@ -39,7 +39,7 @@ describe("population", () => {
       let mixed = 0;
       for (let i = 0; i < 80; i++) {
         const model = generate(`topology-${i}`, { role });
-        const headings = [...new Set(model.runways.filter((runway) => !runway.closed).map((runway) => Math.round(runway.heading)))];
+        const headings = [...new Set(model.runways.filter((runway) => runway.lifecycle === "active").map((runway) => Math.round(runway.heading)))];
         if (headings.length > 1) {
           mixed++;
           const separation = Math.abs(headings[0]! - headings[1]!);
@@ -60,7 +60,7 @@ describe("population", () => {
     for (const role of roles)
       for (let i = 0; i < PER_ROLE; i++) {
         const model = generate(`district-clearance-${i}`, { role });
-        for (const runway of model.runways.filter((candidate) => !candidate.closed)) {
+        for (const runway of model.runways.filter((candidate) => candidate.lifecycle === "active")) {
           for (const apron of model.aprons) expect(clearsRunway(apron.polygon, runway)).toBeTrue();
           for (const building of model.buildings) expect(clearsRunway(building.polygon, runway)).toBeTrue();
         }

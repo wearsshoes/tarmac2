@@ -66,5 +66,4 @@ export class RNG {
   }
   /** Fork an independent labeled stream (harvest H1 derive). */
   derive(label: string): RNG { return new RNG(this.seedString, label); }
-  fork(stream: string): RNG { return this.derive(stream); }
 }

@@ -21,9 +21,10 @@ export function strokeWidths(svg: string): number[] {
   return [...attr, ...style];
 }
 
-/** Inner markup of a `<g id="...">` group. */
+/** Inner markup of a `<g id="...">` group (attributes allowed; stops at the first
+ * closing tag, so nested groups return their leading content only). */
 export function groupContent(svg: string, id: string): string {
-  return svg.match(new RegExp(`<g id="${id}">(.*?)</g>`, "s"))?.[1] ?? "";
+  return svg.match(new RegExp(`<g id="${id}"[^>]*>(.*?)</g>`, "s"))?.[1] ?? "";
 }
 
 export function dataAttr(svg: string, name: string): string | undefined {
