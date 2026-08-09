@@ -656,16 +656,39 @@ function buildDistricts(rng: RNG, role: Role, archetype: TerminalArchetype, head
       300,
     );
     aprons.push({
-      id: "ga-apron", kind: "ga", label: "GENERAL AVIATION PARKING", tieDowns: true,
+      id: "ga-apron", kind: "ga", label: "GENERAL AVIATION PARKING",
       polygon: [at(uGA - halfLen, gaSide * gaW), at(uGA + halfLen, gaSide * gaW), at(uGA + halfLen, gaSide * (gaW + depth)), at(uGA - halfLen, gaSide * (gaW + depth))],
     });
     standRow("ga-apron", uGA, halfLen, gaW + depth * 0.62, gaW + depth * 0.25, gaSide, 110, "regional", true);
-    const rows = rng.int(1, 3);
-    const cols = rng.int(2, 6);
-    for (let row = 0; row < rows; row++) for (let col = 0; col < cols; col++) {
-      const u = uGA - ((cols - 1) / 2) * 185 + col * 185;
-      const w = gaW + depth + 40 + 105 / 2 + row * 170;
-      buildings.push({ id: `hangar-${row}-${col}`, kind: "hangar", label: "HANGARS", polygon: rect(at(u, gaSide * w), 124, 105, -heading), unlabeled: row + col > 0 });
+    // Hangars come in a couple of distinct groups of differing footprint, not
+    // one uniform grid: KITH draws long maintenance bars, a big square box and
+    // several small T-hangar rows, labelled as two separate groups. A grid of
+    // identical rectangles is the single most synthetic thing on a GA field.
+    const groups = rng.int(1, 2) + (ga > 0 ? 1 : 0);
+    let hangarIndex = 0;
+    let labelled = 0;
+    for (let group = 0; group < groups; group++) {
+      // Each group commits to a footprint: long bar, deep box, or small units.
+      const style = rng.weighted([["bar", 0.45], ["box", 0.25], ["units", 0.3]] as const);
+      const count = style === "units" ? rng.int(3, 6) : rng.int(1, 3);
+      const bw = style === "bar" ? rng.float(230, 380) : style === "box" ? rng.float(150, 215) : rng.float(95, 135);
+      const bh = style === "bar" ? rng.float(70, 100) : style === "box" ? rng.float(150, 215) : rng.float(85, 115);
+      const pitch = Math.max(bw, bh) + rng.float(38, 85);
+      // Groups sit at their own depth band and their own along-field offset.
+      const groupW = gaW + depth + 40 + bh / 2 + group * rng.float(210, 300);
+      const groupU = uGA + rng.float(-0.45, 0.45) * halfLen;
+      for (let i = 0; i < count; i++) {
+        const u = groupU - ((count - 1) / 2) * pitch + i * pitch;
+        buildings.push({
+          id: `hangar-${hangarIndex++}`,
+          kind: "hangar",
+          label: "HANGARS",
+          polygon: rect(at(u, gaSide * groupW), bw, bh, -heading),
+          // First hangar of a group carries the label, so separate groups each
+          // get named (KITH labels two); beyond two the sheet gets crowded.
+          unlabeled: i > 0 || labelled++ >= 2,
+        });
+      }
     }
     if (rng.chance(0.4 + ga * 0.4)) {
       buildings.push({ id: "fbo", kind: "fbo", label: "FBO", polygon: rect(at(uGA + halfLen - 120, gaSide * (gaW + depth + 105)), 160, 130, -heading) });

@@ -943,13 +943,9 @@ function buildingsLayer(model: SiteModel, projection: Projection, placer: LabelP
     const point = placed?.point ?? placer.forceBest(anchor, apron.label, fonts.minor, candidates);
     if (placed?.leader || !placed) out += leaderPath(placer, anchor, { x: point.x, y: point.y + 2 });
     out += text(point.x, point.y, apron.label, `class="minor halo" text-anchor="middle" font-size="${fonts.minor}"`);
-    if (apron.tieDowns) {
-      const box = bounds(apron.polygon);
-      for (let row = 0; row < 2; row++) for (let col = 0; col < 6; col++) {
-        const mark = projection.point({ x: box.minX + ((col + 1) * (box.maxX - box.minX)) / 7, y: box.minY + ((row + 1) * (box.maxY - box.minY)) / 3 });
-        out += `<path d="M${num(mark.x - 1.6)} ${num(mark.y)}h3.2M${num(mark.x)} ${num(mark.y - 1.6)}v3.2"/>`;
-      }
-    }
+    // No tie-down symbology: FAA airport diagrams draw GA parking as plain
+    // apron with a label (KITH's GA quadrant carries none), not as a grid of
+    // crosses. The old 2x6 grid of plus signs in apron-bbox space was invented.
   }
   return `${out}</g>`;
 }
@@ -1061,7 +1057,10 @@ function hotspotLayer(model: SiteModel, projection: Projection, placer: LabelPla
     const candidates = [
       { x: rx + 20, y: vertical * (ry + 16) }, { x: -(rx + 24), y: vertical * (ry + 16) },
       { x: rx + 26, y: -vertical * (ry + 18) }, { x: 0, y: vertical * (ry + 26) },
-      ...[1, 1.45, 1.9].flatMap((factor) => RING.slice(1).map((offset) => ({
+      // Reach further before giving up: the HS box always draws a leader back
+      // to its ellipse, so a distant position still reads correctly, whereas a
+      // forced overlap does not.
+      ...[1, 1.45, 1.9, 2.5, 3.2, 4].flatMap((factor) => RING.slice(1).map((offset) => ({
         x: offset.x * factor + Math.sign(offset.x) * rx,
         y: offset.y * factor + Math.sign(offset.y) * ry,
       }))),
