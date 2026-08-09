@@ -83,3 +83,15 @@ the runway; CARGO RAMP / CARGO double-label. Implement the placer from harvest H
   hot spot table, etc. — opaque backing, not transparent overlay).
 - **Multiple hangar/parking groups, demand-based**, sited in reasonable areas
   rather than one fixed cluster.
+- **FIELD ELEV box placed badly.** Renders in odd positions and its leader line
+  ignores other objects, often crossing most of the page. Leader must respect
+  obstacles and stay short.
+- **Side effectivity text font.** "SW-4, 05 SEP 2024 to 03 OCT 2024" on the side
+  margins should be Arial/Helvetica, not Futura.
+- **Taxiway labels must sit exactly on the taxiway** centreline, and should not
+  carry a white halo stroke.
+- **Satellites are oversized** and their parent processors tiny — likely fallout
+  from gate-driven sizing. Scale them down.
+- **Semicircles are too perfect** — need irregularity like the other forms.
+- **Taxiway geometry**: turns should be rounded on the inside; taxiways often
+  join at the wrong places; spurious circles appear at many joints.
