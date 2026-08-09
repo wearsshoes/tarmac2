@@ -149,8 +149,10 @@ describe("terminal rebuild contract (Phase 3)", () => {
     for (const fixture of terminalFixtures) {
       const model = generate(fixture.seed, fixture.options);
       const system = model.terminal!;
-      expect(system.accretion.length).toBeGreaterThanOrEqual(2);
-      expect(system.accretion.length).toBeLessThanOrEqual(4);
+      // Each terminal records its own growth, so the field total scales with the
+      // number of terminals; the per-terminal budget is what stays bounded.
+      expect(system.accretion.length).toBeGreaterThanOrEqual(1);
+      expect(system.accretion.length).toBeLessThanOrEqual(system.units.length * 3);
       const ids = new Set(system.components.map((component) => component.id));
       for (const op of system.accretion) {
         expect(op.cause.length).toBeGreaterThan(0);

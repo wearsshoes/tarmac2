@@ -158,6 +158,15 @@ export interface TerminalComponent {
   edges: ComponentEdge[];
 }
 
+/** The form a *single* terminal takes.
+ *
+ * Distinct from TerminalArchetype, which names the whole field's layout. A real
+ * field mixes forms — JFK's ring is a block next to a crescent next to fingers —
+ * and generating every terminal from one field-wide archetype is what made
+ * generated clusters read as clones on a line (measured centroid spread 0.14
+ * against JFK's 0.33). */
+export type TerminalForm = "bar" | "finger" | "crescent" | "block" | "satellite";
+
 /** An independently processed terminal unit (own curb and processor). */
 export interface TerminalUnit {
   id: string;
@@ -166,6 +175,10 @@ export interface TerminalUnit {
   landsideCourt: Polygon;
   curbLength: number;
   parkingDepth: number;
+  /** This terminal's own form; siblings on the same field may differ. */
+  form: TerminalForm;
+  /** Gates this terminal serves, from the field's program budget. */
+  gates: number;
 }
 
 /** Aircraft stand envelope; generated to validate footprint and circulation. */
@@ -198,6 +211,18 @@ export interface AccretionOp {
   cause: string;
 }
 
+/** A structure joining two terminals that grew close enough to be linked —
+ * airside connector, landside walkway, or people-mover. Recorded only when the
+ * link was actually built: too far apart, or a runway in the way, and the
+ * terminals simply stay separate. */
+export interface TerminalLink {
+  id: string;
+  fromUnitId: string;
+  toUnitId: string;
+  kind: "connector" | "walkway" | "people-mover";
+  points: Point[];
+}
+
 export interface TerminalSystem {
   units: TerminalUnit[];
   components: TerminalComponent[];
@@ -205,6 +230,8 @@ export interface TerminalSystem {
   roadCourts: Polygon[];
   accretion: AccretionOp[];
   gatesPlanned: number;
+  /** Structures joining sibling terminals; empty when none were feasible. */
+  links: TerminalLink[];
 }
 
 export interface SiteModel {

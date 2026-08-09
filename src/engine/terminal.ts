@@ -1,6 +1,6 @@
 import { traceUnion } from "./outline";
 import type { RNG } from "./rng";
-import type { AccretionOp, AircraftClass, Apron, Building, ComponentConnection, ComponentEdge, EdgeRole, Point, Role, Stand, Taxilane, TerminalArchetype, TerminalComponent, TerminalSystem, TerminalUnit } from "./types";
+import type { AccretionOp, AircraftClass, Apron, Building, ComponentConnection, ComponentEdge, EdgeRole, Point, Role, Stand, Taxilane, TerminalArchetype, TerminalComponent, TerminalForm, TerminalLink, TerminalSystem, TerminalUnit } from "./types";
 
 /** Program-first terminal generator (terminal-generator-plan.md, bounding 2.5).
  *
@@ -263,20 +263,81 @@ function programFor(role: Role, family: TerminalArchetype, rng: RNG): Program {
   return { gates, mix, unitCount };
 }
 
-/** Family selection: the role's prior (or override) is honored only when the
- * program can actually fill it; otherwise the nearest feasible family. */
-function feasibleFamily(prior: TerminalArchetype, gates: number): TerminalArchetype {
-  const fits: Record<Exclude<TerminalArchetype, "none">, boolean> = {
-    linear: gates <= 26,
-    pier: gates >= 6,
-    satellite: gates >= 25,
-    parallel: gates >= 35,
-    unit: gates >= 24,
-    semicircle: gates >= 24,
-  };
-  if (prior === "none") return "none";
-  if (fits[prior]) return prior;
-  return prior === "pier" ? "linear" : gates >= 6 ? "pier" : "linear";
+/** Gate capacity of one terminal in a given form. The upper bound is what makes
+ * demand spill into a second terminal rather than growing one implausibly. */
+const FORM_CAPACITY: Record<TerminalForm, [number, number]> = {
+  bar: [4, 26],
+  finger: [10, 70],
+  crescent: [12, 44],
+  block: [16, 60],
+  satellite: [20, 80],
+};
+
+/** Which forms a role would plausibly build. A basic GA field never builds a
+ * satellite; a mega-hub rarely builds a lone bar. */
+function formsFor(role: Role): readonly (readonly [TerminalForm, number])[] {
+  if (role === "business-ga" || role === "basic-ga") return [["bar", 1]] as const;
+  if (role === "regional") return [["bar", 0.55], ["finger", 0.35], ["crescent", 0.1]] as const;
+  if (role === "mid-hub") return [["finger", 0.4], ["bar", 0.2], ["crescent", 0.25], ["block", 0.15]] as const;
+  return [["finger", 0.34], ["crescent", 0.22], ["block", 0.24], ["satellite", 0.2]] as const;
+}
+
+/** The field-scale archetype still names the layout for the model summary and
+ * the UI, so a per-terminal build reports the family its forms add up to. */
+function archetypeOf(forms: TerminalForm[], prior: TerminalArchetype): TerminalArchetype {
+  if (forms.length === 0) return "none";
+  const nameOf = (form: TerminalForm): TerminalArchetype =>
+    form === "bar" ? "linear" : form === "crescent" ? "semicircle" : form === "satellite" ? "satellite" : form === "block" ? "unit" : "pier";
+  if (forms.length === 1) return nameOf(forms[0]!);
+  // Several terminals. The field is named for the form that dominates it, not
+  // simply "unit" — reporting every multi-terminal field as a unit system made
+  // one archetype swallow 83% of the hub population once terminals stopped
+  // being capped at two.
+  if (prior === "parallel") return "parallel";
+  // An explicitly requested archetype is honoured as long as the field still
+  // contains a terminal of that form: the caller asked for a satellite field
+  // and got one, even though a sibling terminal took a different form.
+  if (prior !== "none" && forms.some((form) => nameOf(form) === prior)) return prior;
+  const tally = new Map<TerminalForm, number>();
+  for (const form of forms) tally.set(form, (tally.get(form) ?? 0) + 1);
+  const [top, topCount] = [...tally].sort((a, b) => b[1] - a[1])[0]!;
+  // A genuinely mixed estate (no form more than half) is what "unit" describes:
+  // independent terminals of differing kinds sharing one landside.
+  return topCount > forms.length / 2 ? nameOf(top) : "unit";
+}
+
+/** Pick each terminal's form from unmet gate demand.
+ *
+ * The field's gate program is a budget. The first terminal takes a share; if
+ * gates remain unserved, a second is added — weighted toward the same form, so
+ * a field usually reads as a coherent estate with one odd sibling, the way real
+ * airports do. Two is the cap: beyond that the sheet stops reading as a place
+ * and starts reading as a catalogue. */
+function planTerminals(role: Role, prior: TerminalArchetype, gates: number, rng: RNG): { form: TerminalForm; gates: number }[] {
+  const options = formsFor(role);
+  // A caller-supplied archetype biases the first terminal's form toward the
+  // nearest terminal-scale equivalent.
+  const priorForm: TerminalForm | null =
+    prior === "linear" ? "bar" : prior === "pier" || prior === "parallel" ? "finger" :
+    prior === "semicircle" ? "crescent" : prior === "unit" ? "block" : prior === "satellite" ? "satellite" : null;
+  const first = priorForm && options.some(([f]) => f === priorForm) ? priorForm : rng.weighted(options);
+  const [, firstMax] = FORM_CAPACITY[first];
+  const firstGates = Math.min(gates, Math.max(FORM_CAPACITY[first][0], Math.round(firstMax * rng.float(0.55, 1))));
+  const plan = [{ form: first, gates: firstGates }];
+  // Keep spending the gate budget. The big roles genuinely run estates of four
+  // or five terminals (JFK, LAX, ORD); capping every field at two was making
+  // majors and megas read as undersized. Smaller roles still top out at two.
+  const maxTerminals = role === "mega-hub" ? 5 : role === "major-hub" ? 4 : role === "mid-hub" ? 3 : 2;
+  let remaining = gates - firstGates;
+  while (remaining >= 8 && plan.length < maxTerminals) {
+    // Slight weight toward matching a sibling, so a field reads as one estate
+    // with variety rather than a catalogue of every form.
+    const next = rng.chance(0.45) ? rng.pick(plan).form : rng.weighted(options);
+    const take = Math.min(remaining, Math.max(FORM_CAPACITY[next][0], Math.round(FORM_CAPACITY[next][1] * rng.float(0.5, 1))));
+    plan.push({ form: next, gates: take });
+    remaining -= take;
+  }
+  return plan;
 }
 
 // --- Component construction ---
@@ -351,9 +412,7 @@ export function buildTerminal(rng: RNG, role: Role, archetypePrior: TerminalArch
   const accretionRng = rng.derive("accretion");
   const detailRng = rng.derive("silhouette");
 
-  const preProgram = programFor(role, archetypePrior, programRng);
-  const family = feasibleFamily(archetypePrior, preProgram.gates);
-  const program: Program = { ...preProgram, unitCount: programFor(role, family, programRng.derive("units")).unitCount };
+  const program = programFor(role, archetypePrior, programRng);
 
   const comps: Comp[] = [];
   const roadCourts: UV[][] = [];
@@ -366,16 +425,18 @@ export function buildTerminal(rng: RNG, role: Role, archetypePrior: TerminalArch
   const parkingDepth = dimsRng.float(300, 600);
   const processorDepthFor = (drawn: number): number => Math.min(drawn, Math.max(190, parkingDepth * 0.75));
 
-  interface UnitSpec { id: string; name: string; curbLength: number; parkingDepth: number; court: UV[] }
+  interface UnitSpec { id: string; name: string; curbLength: number; parkingDepth: number; court: UV[]; form: TerminalForm; gates: number }
   const unitSpecs: UnitSpec[] = [];
 
-  const addUnit = (unitIndex: number, u0: number, name: string, processorLength: number, processorDepth: number): UnitSpec => {
+  const addUnit = (unitIndex: number, u0: number, name: string, processorLength: number, processorDepth: number, form: TerminalForm, gates: number): UnitSpec => {
     const curbLength = processorLength * dimsRng.float(1, 1.25);
     const unit: UnitSpec = {
       id: `unit-${unitIndex}`,
       name,
       curbLength,
       parkingDepth,
+      form,
+      gates,
       court: [
         { u: u0 - curbLength / 2, v: -processorDepth / 2 - parkingDepth },
         { u: u0 + curbLength / 2, v: -processorDepth / 2 - parkingDepth },
@@ -387,300 +448,259 @@ export function buildTerminal(rng: RNG, role: Role, archetypePrior: TerminalArch
     return unit;
   };
 
-  // --- Family layouts (components + accretion applied to their specs) ---
+  // --- Per-terminal build ---
+  // Each terminal is planned and built independently from its own form and its
+  // own share of the gate budget, then placed. A field-wide archetype produced
+  // clones on a line (measured centroid spread 0.14 against JFK's 0.33); mixing
+  // forms and placing each terminal on its own frontage is what real estates do.
 
-  if (family === "linear") {
+  const plan = planTerminals(role, archetypePrior, program.gates, programRng.derive("forms"));
+  const family = archetypeOf(plan.map((p) => p.form), archetypePrior);
+
+  /** Where a terminal sits and which way it faces. */
+  interface Placement { u: number; v: number; turn: number }
+
+  // Concourse letters run across the whole field, so no two concourses on the
+  // sheet share a letter regardless of which terminal they belong to.
+  let concourseSeq = 0;
+
+  const placeFn = (placement: Placement) => (poly: UV[]): UV[] =>
+    rotateAbout(poly.map((p) => ({ u: p.u + placement.u, v: p.v + placement.v })), { u: placement.u, v: placement.v }, placement.turn);
+
+  /** Build one terminal in its own local frame, then place it. Returns the
+   * airside reach so siblings can be spaced off it. */
+  const buildOne = (index: number, form: TerminalForm, gates: number, placement: Placement): { reach: number; halfWidth: number } => {
+    const place = placeFn(placement);
     const gateClass = faceClass(dimsRng, program.mix);
-    let length = Math.max(700, program.gates * PITCH[gateClass] * dimsRng.float(1, 1.15));
-    const depth = processorDepthFor(dimsRng.float(170, 260));
-    let bend = 0;
-    const ops = accretionRng.int(2, 3);
-    for (let i = 0; i < ops; i++) {
-      const roll = accretionRng.next();
-      if (roll < 0.4) {
-        length *= accretionRng.float(1.12, 1.25);
-        accretion.push({ op: "lengthen", componentId: "comp-processor-0", cause: cause() });
-      } else if (roll < 0.7 && bend === 0) {
-        // The extension followed the apron edge rather than the original axis.
-        bend = accretionRng.float(0.09, 0.2) * (accretionRng.chance(0.5) ? 1 : -1);
-        accretion.push({ op: "kink", componentId: "comp-processor-0", cause: cause() });
-      } else {
-        accretion.push({ op: "infill-processor", componentId: "comp-processor-0", cause: cause() });
-      }
-    }
-    // A single linear frontage tops out around 2,400 ft; larger programs
-    // degrade to fewer stands rather than an implausible mile-long bar.
-    length = Math.min(length, 2400);
-    const infilled = accretion.some((op) => op.op === "infill-processor");
-    addUnit(0, 0, "TERMINAL", length, depth);
-    // A bent linear terminal is two collinear-rooted wings meeting at the
-    // centerline: the airside face becomes a shallow V, so the gate band and
-    // the stand row follow it instead of lying on one straight line.
-    const poly = bend !== 0 ? bentBar(length, depth, bend) : infilled ? bar(0, 0, length, depth) : notchedBox(0, 0, length, depth);
-    comps.push(makeComp("comp-processor-0", "unit-0", "processor", "attached", poly, { ...processorRule("gate-face"), gateClass }, "TERMINAL", "terminal"));
-    if (detailRng.chance(0.35)) {
-      const stubU = (detailRng.chance(0.5) ? 1 : -1) * length * 0.32;
-      comps.push(makeComp("comp-concourse-0", "unit-0", "concourse", "attached", bar(stubU, depth / 2 + 200, 110, 400), pierRule(gateClass), "TERMINAL", "concourse", true, true));
-    }
-  } else if (family === "pier") {
-    const hub = role.includes("hub");
-    let processorLength = hub ? dimsRng.float(1100, 1700) : dimsRng.float(800, 1200);
-    const processorDepth = processorDepthFor(dimsRng.float(200, 300));
-    interface PierSpec { length: number; width: number; cap: "none" | "tee" | "pod" | "rotunda"; gateClass: AircraftClass; detached: boolean; connection: ComponentConnection; skew: number; kink: number }
-    const pierCount = Math.max(1, Math.min(6, Math.round(program.gates / (hub ? 24 : 12))));
-    const piers: PierSpec[] = Array.from({ length: pierCount }, (_, i) => ({
-      length: (hub ? dimsRng.float(900, 1500) : dimsRng.float(650, 1050)) * (i % 2 ? 0.85 : 1),
-      width: dimsRng.float(100, hub ? 160 : 130),
-      cap: detailRng.pick(["none", "tee", "pod", "rotunda"] as const),
-      gateClass: faceClass(dimsRng, program.mix),
-      detached: false,
-      connection: "attached",
-      skew: 0,
-      kink: 0,
-    }));
-    // Accretion: growth ops recorded with causes, giving earned irregularity.
-    const ops = accretionRng.int(2, 4);
-    for (let i = 0; i < ops; i++) {
-      const roll = accretionRng.next();
-      if (roll < 0.28 && piers.length > 0) {
-        const idx = accretionRng.int(0, piers.length - 1);
-        piers[idx]!.length *= accretionRng.float(1.15, 1.3);
-        accretion.push({ op: "lengthen", componentId: `comp-pier-${idx}`, cause: cause() });
-      } else if (roll < 0.44) {
-        piers.push({
-          length: dimsRng.float(700, 1200), width: dimsRng.float(100, 150),
-          cap: "none", gateClass: faceClass(accretionRng, program.mix), detached: false, connection: "attached",
-          skew: 0, kink: 0,
-        });
-        accretion.push({ op: "add-pier", componentId: `comp-pier-${piers.length - 1}`, cause: cause() });
-      } else if (roll < 0.58) {
-        // Outer piers swing off-axis: the later phase chased a different apron.
-        const idx = accretionRng.chance(0.7) ? piers.length - 1 : accretionRng.int(0, piers.length - 1);
-        piers[idx]!.skew = accretionRng.float(0.1, 0.28) * (accretionRng.chance(0.5) ? 1 : -1);
-        accretion.push({ op: "skew", componentId: `comp-pier-${idx}`, cause: cause() });
-      } else if (roll < 0.7) {
-        const idx = accretionRng.int(0, piers.length - 1);
-        piers[idx]!.kink = accretionRng.float(0.14, 0.34) * (accretionRng.chance(0.5) ? 1 : -1);
-        accretion.push({ op: "kink", componentId: `comp-pier-${idx}`, cause: cause() });
-      } else if (roll < 0.82) {
-        const idx = accretionRng.int(0, piers.length - 1);
-        piers[idx]!.cap = accretionRng.pick(["tee", "pod", "rotunda"] as const);
-        accretion.push({ op: "cap-pier", componentId: `comp-pier-${idx}`, cause: cause() });
-      } else if (roll < 0.92 && hub) {
-        const idx = piers.length - 1;
-        piers[idx]!.detached = true;
-        piers[idx]!.connection = accretionRng.pick(["bridge", "bridge", "tunnel", "at-grade"] as const);
-        accretion.push({ op: "detach-satellite", componentId: `comp-pier-${idx}`, cause: cause() });
-      } else {
-        accretion.push({ op: "infill-processor", componentId: "comp-processor-0", cause: cause() });
-      }
-    }
-    // Pier pitch is derived, not drawn: opposing stand envelopes + shared alley.
-    const pitches = piers.map((p) => p.width + 2 * DEPTH[p.gateClass] + ALLEY);
-    const maxPitch = Math.max(...pitches);
-    processorLength = Math.max(processorLength, piers.length * maxPitch * 0.9);
-    addUnit(0, 0, "TERMINAL", processorLength, processorDepth);
-    const infilled = accretion.some((op) => op.op === "infill-processor");
-    comps.push(makeComp("comp-processor-0", "unit-0", "processor", "attached",
-      infilled ? bar(0, 0, processorLength, processorDepth) : notchedBox(0, 0, processorLength, processorDepth),
-      processorRule("service"), "TERMINAL", "terminal"));
-    piers.forEach((pier, i) => {
-      const u = (i - (piers.length - 1) / 2) * maxPitch + detailRng.float(-60, 60);
-      const root = pier.detached ? processorDepth / 2 + 160 : processorDepth / 2;
-      // Geometry follows the recorded ops: kink first (dogleg about the knee),
-      // then skew (whole finger rotated about its root).
-      const knee = pier.kink !== 0 ? detailRng.float(0.45, 0.65) : 1;
-      let poly = pier.kink !== 0
-        ? kinkedFinger(u, root, pier.length, pier.width, knee, pier.kink)
-        : ccw([
-          { u: u - pier.width / 2, v: root }, { u: u + pier.width / 2, v: root },
-          { u: u + pier.width / 2, v: root + pier.length }, { u: u - pier.width / 2, v: root + pier.length },
-        ]);
-      if (pier.skew !== 0) poly = rotateAbout(poly, { u, v: root }, pier.skew);
-      // Where the finger actually ends, after both ops — the cap must follow it.
-      const tip = (() => {
-        const kneeV = root + pier.length * knee;
-        const rest = pier.length * (1 - knee);
-        const raw = pier.kink !== 0
-          ? { u: u + Math.sin(pier.kink) * rest, v: kneeV + Math.cos(pier.kink) * rest }
-          : { u, v: root + pier.length };
-        return pier.skew !== 0 ? rotateAbout([raw], { u, v: root }, pier.skew)[0]! : raw;
-      })();
-      const tipAngle = pier.kink + pier.skew;
-      comps.push(makeComp(`comp-pier-${i}`, "unit-0", pier.detached ? "satellite" : "pier", pier.detached ? pier.connection : "attached", poly, pierRule(pier.gateClass), `CONCOURSE ${CONCOURSE_LETTERS[i]}`, "concourse"));
-      if (pier.detached && pier.connection === "bridge") {
-        comps.push(makeComp(`comp-connector-${i}`, "unit-0", "connector", "bridge", bar(u, processorDepth / 2 + 80, 45, 160), connectorRule, "", "concourse", true, true));
-      }
-      if (pier.cap !== "none") {
-        const capPoly = pier.cap === "tee"
-          ? rotateAbout(bar(tip.u, tip.v + 60, detailRng.float(320, 520), 120), tip, tipAngle)
-          : bulge(tip.u - pier.width / 2, tip.u + pier.width / 2, tip.v, pier.cap === "rotunda" ? detailRng.float(110, 160) : detailRng.float(75, 110));
-        comps.push(makeComp(`comp-cap-${i}`, "unit-0", "concourse", "attached", capPoly, serviceRule, `CONCOURSE ${CONCOURSE_LETTERS[i]}`, "concourse", true, true));
-      }
-    });
-  } else if (family === "parallel" || family === "satellite") {
-    const processorLength = dimsRng.float(900, 1500);
-    const processorDepth = processorDepthFor(dimsRng.float(240, 340));
-    addUnit(0, 0, "TERMINAL", processorLength, processorDepth);
-    comps.push(makeComp("comp-processor-0", "unit-0", "processor", "attached", notchedBox(0, 0, processorLength, processorDepth), processorRule("service"), "TERMINAL", "terminal"));
-    interface BarSpec { length: number; width: number; gateClass: AircraftClass }
-    const barCount = family === "satellite" ? dimsRng.int(1, 2) : Math.max(2, Math.min(4, Math.round(program.gates / 40) + 1));
-    const bars: BarSpec[] = Array.from({ length: barCount }, () => ({
-      length: Math.min(3400, dimsRng.float(1800, 2600)),
-      width: dimsRng.float(130, 190),
-      gateClass: faceClass(dimsRng, program.mix),
-    }));
-    const ops = accretionRng.int(2, 4);
-    for (let i = 0; i < ops; i++) {
-      const roll = accretionRng.next();
-      if (roll < 0.5 && bars.length > 0) {
-        const idx = accretionRng.int(0, bars.length - 1);
-        bars[idx]!.length = Math.min(3600, bars[idx]!.length * accretionRng.float(1.1, 1.3));
-        accretion.push({ op: "lengthen", componentId: `comp-bar-${idx}`, cause: cause() });
-      } else if (roll < 0.75 && family === "parallel") {
-        bars.push({ length: dimsRng.float(1600, 2400), width: dimsRng.float(130, 190), gateClass: faceClass(accretionRng, program.mix) });
-        accretion.push({ op: "add-pier", componentId: `comp-bar-${bars.length - 1}`, cause: cause() });
-      } else {
-        accretion.push({ op: "infill-processor", componentId: "comp-processor-0", cause: cause() });
-      }
-    }
-    // Bar spacing derived from opposing stand depths + dual taxilane.
-    let v = dimsRng.float(600, 800);
-    bars.forEach((barSpec, i) => {
-      const u = detailRng.float(-160, 160);
-      comps.push(makeComp(`comp-bar-${i}`, "unit-0", "concourse", detailRng.chance(0.6) ? "tunnel" : "bridge", bar(u, v, barSpec.length, barSpec.width), horizontalBarRule(barSpec.gateClass), `CONCOURSE ${CONCOURSE_LETTERS[i]}`, "concourse"));
-      const next = bars[i + 1];
-      if (next) v += barSpec.width / 2 + DEPTH[barSpec.gateClass] + ALLEY + DEPTH[next.gateClass] + next.width / 2 + dimsRng.float(60, 160);
-    });
-    if (family === "satellite") {
-      const podClass: AircraftClass = role === "mega-hub" ? "wide" : "narrow";
-      const podCount = dimsRng.int(2, role === "regional" ? 2 : 4);
-      const podPitch = dimsRng.float(950, 1250);
-      const podV = v + dimsRng.float(700, 900);
-      for (let i = 0; i < podCount; i++) {
-        const u = (i - (podCount - 1) / 2) * podPitch;
-        const size = dimsRng.float(280, 420);
-        const half = size / 2;
-        const poly = ccw([
-          { u: u - half, v: podV - half * 0.55 }, { u: u - half * 0.55, v: podV - half }, { u: u + half * 0.55, v: podV - half },
-          { u: u + half, v: podV - half * 0.55 }, { u: u + half, v: podV + half * 0.55 }, { u: u + half * 0.55, v: podV + half },
-          { u: u - half * 0.55, v: podV + half }, { u: u - half, v: podV + half * 0.55 },
-        ]);
-        const connection = detailRng.pick(["bridge", "tunnel", "tunnel", "at-grade"] as const);
-        comps.push(makeComp(`comp-pod-${i}`, "unit-0", "satellite", connection, poly, allGates(podClass), `CONCOURSE ${CONCOURSE_LETTERS[barCount + i]}`, "concourse", true, i > 0));
-        if (connection === "bridge") {
-          comps.push(makeComp(`comp-podlink-${i}`, "unit-0", "connector", "bridge", bar(u, podV - half - 120, 45, 240), connectorRule, "", "concourse", true, true));
+    const pitch = PITCH[gateClass];
+    const unitId = `unit-${index}`;
+    const name = plan.length > 1 ? `TERMINAL ${index + 1}` : "TERMINAL";
+    // Only the processor is the terminal. Piers, arms and pods are concourses
+    // and are lettered as such — labelling every mass "TERMINAL" was reading as
+    // a field with four terminals when it has one terminal and three concourses.
+    const concourseName = (): string => `CONCOURSE ${CONCOURSE_LETTERS[concourseSeq++] ?? "X"}`;
+    const ops = accretionRng.int(1, 2);
+    let reach = 0;
+    let halfWidth = 0;
+
+    if (form === "bar") {
+      // A single frontage, straight or bent where a later phase followed the
+      // apron edge rather than the original axis.
+      let length = Math.max(700, gates * pitch * dimsRng.float(1, 1.15));
+      const depth = processorDepthFor(dimsRng.float(180, 270));
+      let bend = 0;
+      for (let i = 0; i < ops; i++) {
+        const roll = accretionRng.next();
+        if (roll < 0.4) {
+          length *= accretionRng.float(1.1, 1.22);
+          accretion.push({ op: "lengthen", componentId: `comp-processor-${index}`, cause: cause() });
+        } else if (roll < 0.72 && bend === 0) {
+          bend = accretionRng.float(0.1, 0.22) * (accretionRng.chance(0.5) ? 1 : -1);
+          accretion.push({ op: "kink", componentId: `comp-processor-${index}`, cause: cause() });
+        } else {
+          accretion.push({ op: "infill-processor", componentId: `comp-processor-${index}`, cause: cause() });
         }
       }
-    }
-  } else if (family === "unit") {
-    // Unit-terminal system (JFK/LAX): independent units spaced by the road court.
-    const unitClass: AircraftClass = role === "mega-hub" ? "wide" : "narrow";
-    const specs = Array.from({ length: program.unitCount }, (_, i) => ({
-      processorLength: dimsRng.float(700, 1000),
-      processorDepth: processorDepthFor(dimsRng.float(220, 300)),
-      style: dimsRng.pick(["pier", "bar", "crescent"] as const),
-      gateClass: faceClass(dimsRng, program.mix),
-      index: i,
-    }));
-    const ops = accretionRng.int(2, 4);
-    for (let i = 0; i < ops; i++) {
-      const roll = accretionRng.next();
-      if (roll < 0.4) {
-        const idx = accretionRng.int(0, specs.length - 1);
-        specs[idx]!.processorLength *= accretionRng.float(1.1, 1.25);
-        accretion.push({ op: "lengthen", componentId: `comp-processor-${idx}`, cause: cause() });
-      } else if (roll < 0.65 && specs.length < 6) {
-        specs.push({ processorLength: dimsRng.float(650, 900), processorDepth: processorDepthFor(dimsRng.float(220, 280)), style: dimsRng.pick(["pier", "bar"] as const), gateClass: faceClass(accretionRng, program.mix), index: specs.length });
-        accretion.push({ op: "add-unit", componentId: `comp-processor-${specs.length - 1}`, cause: cause() });
-      } else {
-        const idx = accretionRng.int(0, specs.length - 1);
-        accretion.push({ op: "infill-processor", componentId: `comp-processor-${idx}`, cause: cause() });
-      }
-    }
-    // Unit pitch bounded by the landside envelope: curb + court access margin.
-    const maxCurb = Math.max(...specs.map((s) => s.processorLength * 1.25));
-    const pitch = Math.max(dimsRng.float(1350, 1650), maxCurb + 220);
-    const infilledIds = new Set(accretion.filter((op) => op.op === "infill-processor").map((op) => op.componentId));
-    specs.forEach((spec, i) => {
-      const u = (i - (specs.length - 1) / 2) * pitch;
-      // Units on a real unit-terminal field (JFK, LAX) sit around a loop, each
-      // set back by its own amount and turned to face its own piece of apron.
-      // A perfect comb at one pitch on one line — every unit at v=0 — is the
-      // single most artificial thing the old layout produced: the traced apron
-      // came out as one straight ribbon instead of a ring.
-      const setback = dimsRng.float(-260, 260);
-      const turn = dimsRng.float(-0.3, 0.3);
-      const place = (poly: UV[]): UV[] =>
-        rotateAbout(poly.map((p) => ({ u: p.u, v: p.v + setback })), { u, v: setback }, turn);
-      const unit = addUnit(i, u, `TERMINAL ${i + 1}`, spec.processorLength, spec.processorDepth);
-      // The court moves with its unit, so landside stays landside after the turn.
+      length = Math.min(length, 2400);
+      const unit = addUnit(index, 0, name, length, depth, form, gates);
       unit.court = place(unit.court);
-      const poly = infilledIds.has(`comp-processor-${i}`) ? bar(u, 0, spec.processorLength, spec.processorDepth) : notchedBox(u, 0, spec.processorLength, spec.processorDepth);
-      comps.push(makeComp(`comp-processor-${i}`, unit.id, "processor", "attached", place(poly), { ...processorRule(spec.style === "bar" ? "service" : "gate-face"), gateClass: spec.gateClass }, unit.name, "terminal"));
-      if (spec.style === "pier") {
-        const length = dimsRng.float(550, 850);
-        comps.push(makeComp(`comp-unit-pier-${i}`, unit.id, "pier", "attached",
-          place(ccw([{ u: u - 70, v: spec.processorDepth / 2 }, { u: u + 70, v: spec.processorDepth / 2 }, { u: u + 70, v: spec.processorDepth / 2 + length }, { u: u - 70, v: spec.processorDepth / 2 + length }])),
-          pierRule(spec.gateClass), unit.name, "concourse", true, true));
-      } else if (spec.style === "bar") {
-        comps.push(makeComp(`comp-unit-bar-${i}`, unit.id, "concourse", "attached", place(bar(u, spec.processorDepth / 2 + 280, dimsRng.float(750, 1050), 150)), horizontalBarRule(spec.gateClass), unit.name, "concourse", true, true));
-        comps.push(makeComp(`comp-unit-stem-${i}`, unit.id, "connector", "attached", place(bar(u, spec.processorDepth / 2 + 140, 90, 280)), connectorRule, "", "concourse", true, true));
-      } else {
-        comps.push(makeComp(`comp-unit-arc-${i}`, unit.id, "concourse", "attached", place(arcBand(u, spec.processorDepth / 2 + 120, dimsRng.float(700, 950), dimsRng.float(160, 250), dimsRng.float(100, 130))), crescentRule(spec.gateClass), unit.name, "concourse", true, true));
+      const poly = bend !== 0 ? bentBar(length, depth, bend) : notchedBox(0, 0, length, depth);
+      comps.push(makeComp(`comp-processor-${index}`, unitId, "processor", "attached", place(poly), { ...processorRule("gate-face"), gateClass }, name, "terminal"));
+      reach = depth / 2;
+      halfWidth = length / 2;
+    } else if (form === "finger") {
+      // A processor with one to three piers; the workhorse hub terminal.
+      const processorLength = dimsRng.float(750, 1350);
+      const processorDepth = processorDepthFor(dimsRng.float(200, 300));
+      interface PierSpec { length: number; width: number; cap: "none" | "tee" | "pod" | "rotunda"; gateClass: AircraftClass; skew: number; kink: number }
+      const pierCount = Math.max(1, Math.min(3, Math.round(gates / 22)));
+      const piers: PierSpec[] = Array.from({ length: pierCount }, (_, i) => ({
+        length: dimsRng.float(700, 1250) * (i % 2 ? 0.85 : 1),
+        width: dimsRng.float(100, 155),
+        cap: detailRng.pick(["none", "none", "tee", "pod", "rotunda"] as const),
+        gateClass: faceClass(dimsRng, program.mix),
+        skew: 0,
+        kink: 0,
+      }));
+      for (let i = 0; i < ops; i++) {
+        const roll = accretionRng.next();
+        const idx = accretionRng.int(0, piers.length - 1);
+        if (roll < 0.3) {
+          piers[idx]!.length *= accretionRng.float(1.12, 1.28);
+          accretion.push({ op: "lengthen", componentId: `comp-pier-${index}-${idx}`, cause: cause() });
+        } else if (roll < 0.55) {
+          piers[idx]!.skew = accretionRng.float(0.1, 0.26) * (accretionRng.chance(0.5) ? 1 : -1);
+          accretion.push({ op: "skew", componentId: `comp-pier-${index}-${idx}`, cause: cause() });
+        } else if (roll < 0.78) {
+          piers[idx]!.kink = accretionRng.float(0.14, 0.32) * (accretionRng.chance(0.5) ? 1 : -1);
+          accretion.push({ op: "kink", componentId: `comp-pier-${index}-${idx}`, cause: cause() });
+        } else {
+          piers[idx]!.cap = accretionRng.pick(["tee", "pod", "rotunda"] as const);
+          accretion.push({ op: "cap-pier", componentId: `comp-pier-${index}-${idx}`, cause: cause() });
+        }
       }
-    });
-    // Road court spine: the loop/spine reservation that positions the units.
-    const spineHalf = ((specs.length - 1) / 2) * pitch + maxCurb / 2 + 150;
-    const maxDepth = Math.max(...specs.map((s) => s.processorDepth));
-    roadCourts.push([
-      { u: -spineHalf, v: -maxDepth / 2 - parkingDepth - 240 },
-      { u: spineHalf, v: -maxDepth / 2 - parkingDepth - 240 },
-      { u: spineHalf, v: -maxDepth / 2 - parkingDepth },
-      { u: -spineHalf, v: -maxDepth / 2 - parkingDepth },
-    ]);
-  } else {
-    // Curvilinear (DFW): shallow arcs strung along a spine, each its own unit,
-    // with the road court inside each horseshoe.
-    const specs = Array.from({ length: program.unitCount }, (_, i) => ({
-      chord: dimsRng.float(950, 1300),
-      sag: dimsRng.float(220, 330),
-      width: dimsRng.float(100, 140),
-      gateClass: faceClass(dimsRng, program.mix),
-      index: i,
-    }));
-    const ops = accretionRng.int(2, 3);
-    for (let i = 0; i < ops; i++) {
-      if (accretionRng.chance(0.45) && specs.length < 6) {
-        specs.push({ chord: dimsRng.float(900, 1200), sag: dimsRng.float(200, 300), width: dimsRng.float(100, 140), gateClass: faceClass(accretionRng, program.mix), index: specs.length });
-        accretion.push({ op: "add-unit", componentId: `comp-arc-${specs.length - 1}`, cause: cause() });
-      } else {
-        const idx = accretionRng.int(0, specs.length - 1);
-        specs[idx]!.chord *= accretionRng.float(1.08, 1.2);
-        accretion.push({ op: "lengthen", componentId: `comp-arc-${idx}`, cause: cause() });
+      const pierNames = piers.map(() => concourseName());
+      const pitches = piers.map((p) => p.width + 2 * DEPTH[p.gateClass] + ALLEY);
+      const maxPitch = Math.max(...pitches);
+      const spanned = Math.max(processorLength, piers.length * maxPitch * 0.9);
+      const unit = addUnit(index, 0, name, spanned, processorDepth, form, gates);
+      unit.court = place(unit.court);
+      comps.push(makeComp(`comp-processor-${index}`, unitId, "processor", "attached",
+        place(notchedBox(0, 0, spanned, processorDepth)), processorRule("service"), name, "terminal"));
+      piers.forEach((pier, i) => {
+        const u = (i - (piers.length - 1) / 2) * maxPitch + detailRng.float(-50, 50);
+        const root = processorDepth / 2;
+        const knee = pier.kink !== 0 ? detailRng.float(0.45, 0.65) : 1;
+        let poly = pier.kink !== 0
+          ? kinkedFinger(u, root, pier.length, pier.width, knee, pier.kink)
+          : ccw([
+            { u: u - pier.width / 2, v: root }, { u: u + pier.width / 2, v: root },
+            { u: u + pier.width / 2, v: root + pier.length }, { u: u - pier.width / 2, v: root + pier.length },
+          ]);
+        if (pier.skew !== 0) poly = rotateAbout(poly, { u, v: root }, pier.skew);
+        const tip = (() => {
+          const kneeV = root + pier.length * knee;
+          const rest = pier.length * (1 - knee);
+          const raw = pier.kink !== 0
+            ? { u: u + Math.sin(pier.kink) * rest, v: kneeV + Math.cos(pier.kink) * rest }
+            : { u, v: root + pier.length };
+          return pier.skew !== 0 ? rotateAbout([raw], { u, v: root }, pier.skew)[0]! : raw;
+        })();
+        comps.push(makeComp(`comp-pier-${index}-${i}`, unitId, "pier", "attached", place(poly), pierRule(pier.gateClass), pierNames[i]!, "concourse", true, false));
+        if (pier.cap !== "none") {
+          const capPoly = pier.cap === "tee"
+            ? rotateAbout(bar(tip.u, tip.v + 60, detailRng.float(300, 480), 120), tip, pier.kink + pier.skew)
+            : bulge(tip.u - pier.width / 2, tip.u + pier.width / 2, tip.v, pier.cap === "rotunda" ? detailRng.float(110, 155) : detailRng.float(75, 110));
+          comps.push(makeComp(`comp-cap-${index}-${i}`, unitId, "concourse", "attached", place(capPoly), serviceRule, pierNames[i]!, "concourse", true, true));
+        }
+      });
+      reach = processorDepth / 2 + Math.max(...piers.map((p) => p.length)) + 120;
+      halfWidth = spanned / 2;
+    } else if (form === "crescent") {
+      // Curved frontage with the road court inside the horseshoe (DFW).
+      let chord = Math.max(800, gates * pitch * dimsRng.float(0.5, 0.7));
+      const sag = dimsRng.float(220, 340);
+      const width = dimsRng.float(100, 145);
+      for (let i = 0; i < ops; i++) {
+        chord *= accretionRng.float(1.06, 1.18);
+        accretion.push({ op: "lengthen", componentId: `comp-processor-${index}`, cause: cause() });
       }
-    }
-    const maxChord = Math.max(...specs.map((s) => s.chord));
-    const pitch = maxChord + dimsRng.float(380, 550);
-    specs.forEach((spec, i) => {
-      const u = (i - (specs.length - 1) / 2) * pitch;
-      const unit = addUnit(i, u, `TERMINAL ${String.fromCharCode(65 + i)}`, spec.chord * 0.8, 200);
-      comps.push(makeComp(`comp-arc-${i}`, unit.id, "processor", "attached", arcBand(u, 0, spec.chord, spec.sag, spec.width), crescentRule(spec.gateClass), unit.name, "terminal"));
-      // Road court: the lens inside the horseshoe between chord and inner arc.
-      const h = spec.chord / 2;
-      const R = (h * h + spec.sag * spec.sag) / (2 * spec.sag);
-      const vc = spec.sag - R;
+      chord = Math.min(chord, 1500);
+      const unit = addUnit(index, 0, name, chord * 0.8, 200, form, gates);
+      unit.court = place(unit.court);
+      comps.push(makeComp(`comp-processor-${index}`, unitId, "processor", "attached",
+        place(arcBand(0, 0, chord, sag, width)), crescentRule(gateClass), name, "terminal"));
+      // The lens inside the horseshoe is roadway, never apron.
+      const h = chord / 2;
+      const R = (h * h + sag * sag) / (2 * sag);
+      const vc = sag - R;
       const theta = Math.asin(h / R);
       const court: UV[] = [];
-      const Ri = R - spec.width / 2 - 40;
+      const Ri = R - width / 2 - 40;
       for (let k = 0; k <= 8; k++) {
         const a = -theta * 0.82 + (2 * theta * 0.82 * k) / 8;
-        court.push({ u: u + Math.sin(a) * Ri, v: vc + Math.cos(a) * Ri });
+        court.push({ u: Math.sin(a) * Ri, v: vc + Math.cos(a) * Ri });
       }
-      roadCourts.push(ccw(court));
-    });
-  }
+      roadCourts.push(place(ccw(court)));
+      reach = sag + width / 2;
+      halfWidth = chord / 2;
+    } else if (form === "block") {
+      // A chunky processor with short arms — the compact unit terminal that
+      // gives a ring its mass (JFK aspect ratios measured at 1.5-2.1).
+      const blockLength = dimsRng.float(600, 950);
+      const blockDepth = processorDepthFor(dimsRng.float(340, 520));
+      for (let i = 0; i < ops; i++) {
+        accretion.push({ op: accretionRng.chance(0.5) ? "infill-processor" : "lengthen", componentId: `comp-processor-${index}`, cause: cause() });
+      }
+      const unit = addUnit(index, 0, name, blockLength, blockDepth, form, gates);
+      unit.court = place(unit.court);
+      comps.push(makeComp(`comp-processor-${index}`, unitId, "processor", "attached",
+        place(notchedBox(0, 0, blockLength, blockDepth)), { ...processorRule("gate-face"), gateClass }, name, "terminal"));
+      // Short arms off both ends, angled outward, enclosing the ramp. Both arms
+      // are one concourse — they are two ends of the same airside structure.
+      const armName = concourseName();
+      const armLength = dimsRng.float(280, 520);
+      for (const side of [-1, 1] as const) {
+        const armU = side * (blockLength / 2 - 60);
+        const arm = rotateAbout(
+          ccw([
+            { u: armU - 65, v: blockDepth / 2 }, { u: armU + 65, v: blockDepth / 2 },
+            { u: armU + 65, v: blockDepth / 2 + armLength }, { u: armU - 65, v: blockDepth / 2 + armLength },
+          ]),
+          { u: armU, v: blockDepth / 2 },
+          side * dimsRng.float(0.15, 0.45),
+        );
+        comps.push(makeComp(`comp-arm-${index}-${side > 0 ? "r" : "l"}`, unitId, "pier", "attached", place(arm), pierRule(gateClass), armName, "concourse", true, side < 0));
+      }
+      reach = blockDepth / 2 + armLength;
+      halfWidth = blockLength / 2 + 200;
+    } else {
+      // Satellite: a processor with a detached pod reached by a link.
+      const processorLength = dimsRng.float(700, 1050);
+      const processorDepth = processorDepthFor(dimsRng.float(220, 320));
+      const gap = dimsRng.float(650, 1000);
+      const podClass: AircraftClass = role === "mega-hub" ? "wide" : "narrow";
+      // Sized from its own gate demand: the pod is an octagon, so each of its 8
+      // faces runs about 0.45 of the width, and a face shorter than one stand
+      // pitch parks nothing at all. A fixed 320-480 ft pod silently produced
+      // zero stands for wide-body pods (pitch 230 ft).
+      const podSize = Math.max(
+        PITCH[podClass] * 2.6,
+        (gates * PITCH[podClass]) / (8 * 0.45) * dimsRng.float(1, 1.15),
+      );
+      for (let i = 0; i < ops; i++) {
+        accretion.push({ op: "detach-satellite", componentId: `comp-pod-${index}`, cause: cause() });
+      }
+      const unit = addUnit(index, 0, name, processorLength, processorDepth, form, gates);
+      unit.court = place(unit.court);
+      comps.push(makeComp(`comp-processor-${index}`, unitId, "processor", "attached",
+        place(notchedBox(0, 0, processorLength, processorDepth)), processorRule("service"), name, "terminal"));
+      const podV = processorDepth / 2 + gap + podSize / 2;
+      const half = podSize / 2;
+      const pod = ccw([
+        { u: -half, v: podV - half * 0.55 }, { u: -half * 0.55, v: podV - half }, { u: half * 0.55, v: podV - half },
+        { u: half, v: podV - half * 0.55 }, { u: half, v: podV + half * 0.55 }, { u: half * 0.55, v: podV + half },
+        { u: -half * 0.55, v: podV + half }, { u: -half, v: podV + half * 0.55 },
+      ]);
+      const connection = detailRng.pick(["bridge", "tunnel", "tunnel", "at-grade"] as const);
+      comps.push(makeComp(`comp-pod-${index}`, unitId, "satellite", connection, place(pod), allGates(podClass), concourseName(), "concourse", true, false));
+      if (connection === "bridge") {
+        comps.push(makeComp(`comp-podlink-${index}`, unitId, "connector", "bridge",
+          place(bar(0, processorDepth / 2 + gap / 2, 45, gap)), connectorRule, "", "concourse", true, true));
+      }
+      reach = podV + half;
+      halfWidth = Math.max(processorLength, podSize) / 2;
+    }
+    return { reach, halfWidth };
+  };
 
+  // Terminals are laid out along a shared landside frontage, alternating sides
+  // of the first so the estate grows outward in both directions rather than
+  // marching off in one. Each shares a land-facing radius — a modest setback,
+  // not a free offset — and is turned *away* from the field centre, so the
+  // group splays open around its landside the way a real estate does. Turning
+  // inward would aim neighbouring gate frontages at each other and close off
+  // the ramp between them.
+  const placements: Placement[] = [{ u: 0, v: 0, turn: 0 }];
+  const built = [buildOne(0, plan[0]!.form, plan[0]!.gates, placements[0]!)];
+  let reachRight = built[0]!.halfWidth;
+  let reachLeft = -built[0]!.halfWidth;
+  for (let i = 1; i < plan.length; i++) {
+    // Alternate sides: 1 right, 2 left, 3 right...
+    const side = i % 2 === 1 ? 1 : -1;
+    const from = side > 0 ? reachRight : reachLeft;
+    const u = from + side * dimsRng.float(520, 950);
+    const placement: Placement = {
+      u,
+      v: dimsRng.float(-180, 180),
+      turn: -side * dimsRng.float(0.05, 0.3),
+    };
+    placements.push(placement);
+    const result = buildOne(i, plan[i]!.form, plan[i]!.gates, placement);
+    built.push(result);
+    if (side > 0) reachRight = u + result.halfWidth;
+    else reachLeft = u - result.halfWidth;
+  }
   // --- Stands on gate faces (validate footprint; drive the apron) ---
   const stands: Stand[] = [];
   const uvStands: { center: UV; facing: UV; cls: AircraftClass; pitch: number; depth: number; ownerId: string }[] = [];
@@ -906,18 +926,22 @@ export function buildTerminal(rng: RNG, role: Role, archetypePrior: TerminalArch
   };
   // True overlap, not bounding boxes: a turned unit's court sits diagonally
   // across the frame, and its box would veto legitimate bays beside it.
+  const segmentsCross = (p1: UV, p2: UV, p3: UV, p4: UV): boolean => {
+    const d = (p2.u - p1.u) * (p4.v - p3.v) - (p2.v - p1.v) * (p4.u - p3.u);
+    if (Math.abs(d) < 1e-9) return false;
+    const t = ((p3.u - p1.u) * (p4.v - p3.v) - (p3.v - p1.v) * (p4.u - p3.u)) / d;
+    const s = ((p3.u - p1.u) * (p2.v - p1.v) - (p3.v - p1.v) * (p2.u - p1.u)) / d;
+    return t > 0 && t < 1 && s > 0 && s < 1;
+  };
   const hitsCourt = (poly: UV[]): boolean =>
     courts.some((court) => {
       if (poly.some((p) => inPoly(p, court)) || court.some((p) => inPoly(p, poly))) return true;
-      // Sampled interior points catch a filler that straddles a court without
-      // either ring's vertices landing inside the other.
-      for (let t = 0.2; t < 1; t += 0.2) {
-        for (let s = 0.2; s < 1; s += 0.2) {
-          const a = poly[0]!;
-          const b = poly[1] ?? a;
-          const c = poly[2] ?? a;
-          const probe = { u: a.u + (b.u - a.u) * t + (c.u - b.u) * s, v: a.v + (b.v - a.v) * t + (c.v - b.v) * s };
-          if (inPoly(probe, court)) return true;
+      // Crossing edges catch a piece that straddles a court without either
+      // ring's vertices landing inside the other — the collector ribbon
+      // sweeping across a turned terminal's curb is exactly this case.
+      for (let i = 0; i < poly.length; i++) {
+        for (let j = 0; j < court.length; j++) {
+          if (segmentsCross(poly[i]!, poly[(i + 1) % poly.length]!, court[j]!, court[(j + 1) % court.length]!)) return true;
         }
       }
       return false;
@@ -925,6 +949,49 @@ export function buildTerminal(rng: RNG, role: Role, archetypePrior: TerminalArch
   fillers
     .filter((poly) => !hitsCourt(poly))
     .forEach((poly, i) => apronPieces.push({ id: `band-fill-${i}`, poly: ccw(poly) }));
+
+  /** Clip a polygon back out of a convex court, keeping it whole.
+   *
+   * Bands and the collector cannot simply be dropped when they reach a court —
+   * a gate face without pavement is a worse defect than a short band — so they
+   * are cut against the court edge they least overrun. Applied *after* the
+   * outward grow and chamfer, because those push the boundary back over a curb
+   * that was clear before them. */
+  const clipOutOfCourts = (poly: UV[], margin: number): UV[] => {
+    let result = poly;
+    for (const court of courts) {
+      if (!hitsCourt(result)) break;
+      const cu = court.reduce((s, p) => s + p.u, 0) / court.length;
+      const cv = court.reduce((s, p) => s + p.v, 0) / court.length;
+      let bestEdge: { n: UV; d: number; kept: number } | null = null;
+      for (let j = 0; j < court.length; j++) {
+        const a = court[j]!;
+        const b = court[(j + 1) % court.length]!;
+        const len = Math.hypot(b.u - a.u, b.v - a.v) || 1;
+        let n = { u: (b.v - a.v) / len, v: -(b.u - a.u) / len };
+        if ((a.u - cu) * n.u + (a.v - cv) * n.v < 0) n = { u: -n.u, v: -n.v };
+        const d = a.u * n.u + a.v * n.v + margin;
+        const kept = result.filter((p) => p.u * n.u + p.v * n.v >= d).length;
+        if (kept >= 3 && (!bestEdge || kept > bestEdge.kept)) bestEdge = { n, d, kept };
+      }
+      if (!bestEdge) continue;
+      const { n, d } = bestEdge;
+      const clipped: UV[] = [];
+      for (let j = 0; j < result.length; j++) {
+        const a = result[j]!;
+        const b = result[(j + 1) % result.length]!;
+        const da = a.u * n.u + a.v * n.v - d;
+        const db = b.u * n.u + b.v * n.v - d;
+        if (da >= 0) clipped.push(a);
+        if ((da >= 0) !== (db >= 0)) {
+          const t = da / (da - db);
+          clipped.push({ u: a.u + (b.u - a.u) * t, v: a.v + (b.v - a.v) * t });
+        }
+      }
+      if (clipped.length >= 3) result = clipped;
+    }
+    return result;
+  };
 
   const apronEdgeV = vCollector + COLLECTOR_W / 2;
 
@@ -1001,22 +1068,74 @@ export function buildTerminal(rng: RNG, role: Role, archetypePrior: TerminalArch
         { u: push.u + ((next.u - cur.u) / inB) * cut, v: push.v + ((next.v - cur.v) / inB) * cut },
       );
     }
-    return out.map((p) => at(p.u, p.v));
+    // Clipped after growing: the outward push and chamfer would otherwise put
+    // the boundary back over a curb the raw piece had cleared.
+    return clipOutOfCourts(out, 30).map((p) => at(p.u, p.v));
   });
   const traced = traceUnion(grown, { cell: 25, tolerance: 28, minArea: 12000 });
   const aprons: Apron[] = traced.map((polygon, i) => ({ id: `band-apron-${i}`, kind: "terminal" as const, polygon }));
-  // RON ramp markers between parallel bars keep their labels.
-  if (family === "parallel") {
-    const barComps = comps.filter((c) => c.id.startsWith("comp-bar-"));
-    for (let i = 0; i + 1 < barComps.length; i++) {
-      const vMid = (Math.max(...barComps[i]!.poly.map((p) => p.v)) + Math.min(...barComps[i + 1]!.poly.map((p) => p.v))) / 2;
-      aprons.push({ id: `ramp-${i + 1}`, kind: "ron", label: `RAMP ${i + 1}`, polygon: bar(0, vMid, 10, 10).map(toWorld) });
+  // --- Linking sibling terminals ---
+  // Two terminals that grew close enough get joined by structure; too far apart
+  // and they simply stay separate, which is itself a common real arrangement.
+  // The link runs between the nearest points of the two processors, offset to
+  // the landside so it never crosses the gate faces or the stand rows it would
+  // otherwise block. The caller vetoes links that would cross a runway — that
+  // check needs the world frame and the runway set, which live in the generator.
+  const links: TerminalLink[] = [];
+  const processorOf = (unitId: string) => comps.find((c) => c.unitId === unitId && c.kind === "processor");
+  // Order units by position so links join actual neighbours, not across the field.
+  const ordered = unitSpecs
+    .map((unit, i) => ({ unit, u: placements[i]?.u ?? 0 }))
+    .sort((x, y) => x.u - y.u)
+    .map((x) => x.unit);
+  for (let i = 0; i + 1 < ordered.length; i++) {
+    const a = processorOf(ordered[i]!.id);
+    const b = processorOf(ordered[i + 1]!.id);
+    if (!a || !b) continue;
+    // Nearest vertex pair between the two masses.
+    let best: { from: UV; to: UV; d: number } | null = null;
+    for (const p of a.poly) {
+      for (const q of b.poly) {
+        const d = Math.hypot(q.u - p.u, q.v - p.v);
+        if (!best || d < best.d) best = { from: p, to: q, d };
+      }
     }
+    // Beyond ~1,700 ft a connecting structure stops being plausible; below
+    // that, the longer the span the more likely it is a people-mover rather
+    // than a walkway.
+    if (!best || best.d >= 1700) continue;
+    const kind: TerminalLink["kind"] = best.d > 1100 ? "people-mover" : best.d > 600 ? "walkway" : "connector";
+    links.push({
+      id: `link-${i}`,
+      fromUnitId: ordered[i]!.id,
+      toUnitId: ordered[i + 1]!.id,
+      kind,
+      points: [toWorld(best.from), toWorld(best.to)],
+    });
+    // A drawn connector is real structure; walkways and people-movers are
+    // elevated and charted as a thin link rather than a building mass.
+    if (kind === "connector") {
+      const mid = { u: (best.from.u + best.to.u) / 2, v: (best.from.v + best.to.v) / 2 };
+      const angle = Math.atan2(best.to.v - best.from.v, best.to.u - best.from.u);
+      comps.push(makeComp(`comp-link-${i}`, ordered[i]!.id, "connector", "bridge",
+        rotateAbout(bar(mid.u, mid.v, best.d, 70), mid, angle), connectorRule, "", "concourse", true, true));
+    }
+  }
+
+  // A named RON ramp in the pocket between sibling terminals — the ramp label
+  // real charts carry where two estates share overnight parking.
+  // Sorted by position: placements alternate sides, so index order is not
+  // spatial order and the ramp would land between non-neighbours.
+  const byU = placements.map((p) => p.u).sort((a, b) => a - b);
+  for (let i = 0; i + 1 < byU.length && i < 3; i++) {
+    const midU = (byU[i]! + byU[i + 1]!) / 2;
+    aprons.push({ id: `ramp-${i + 1}`, kind: "ron", label: `RAMP ${i + 1}`, polygon: bar(midU, vCollector - 300, 10, 10).map(toWorld) });
   }
 
   const system: TerminalSystem = {
     units: unitSpecs.map((unit): TerminalUnit => ({
       id: unit.id, name: unit.name, curbLength: unit.curbLength, parkingDepth: unit.parkingDepth,
+      form: unit.form, gates: unit.gates,
       landsideCourt: unit.court.map(toWorld),
     })),
     components: comps.map((comp) => ({
@@ -1027,6 +1146,7 @@ export function buildTerminal(rng: RNG, role: Role, archetypePrior: TerminalArch
     roadCourts: roadCourts.map((court) => court.map(toWorld)),
     accretion,
     gatesPlanned: program.gates,
+    links,
   };
   for (const s of uvStands) {
     const origin = at(0, 0);

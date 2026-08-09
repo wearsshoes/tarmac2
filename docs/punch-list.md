@@ -67,3 +67,19 @@ the runway; CARGO RAMP / CARGO double-label. Implement the placer from harvest H
   reference SVGs (they currently only back 27 assertions).
 - Property test for P1 explicitly: every open runway's fill is solid black.
 - Determinism: same seed → byte-identical SVG (exists); add cross-role coverage.
+
+## Next pass (queued 2026-08-08)
+
+- **GA parking slots render wrong.** The tie-down/parking slot symbology on GA
+  aprons is incorrect — verify against reference/real-airports/faa (KITH and the
+  GA quadrants of larger fields) before redrawing.
+- **Hangars need improvement** in the same pass: currently repeated identical
+  bars, where real charts show varied footprints and orientations.
+- **Typography and margin layout.** "AIRPORT DIAGRAM" is too small; too much
+  space between it and the top line of the diagram. Reposition all top and
+  bottom margin text correctly. Overall sheet font is too small on many maps.
+- **Graticule lines must run to the neatline**, not stop short of the edges.
+- **Margin boxes must mask the graticule behind them** ("RAMP FREQUENCIES",
+  hot spot table, etc. — opaque backing, not transparent overlay).
+- **Multiple hangar/parking groups, demand-based**, sited in reasonable areas
+  rather than one fixed cluster.

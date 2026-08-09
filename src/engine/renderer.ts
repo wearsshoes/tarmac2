@@ -824,6 +824,34 @@ function towerElevation(model: SiteModel): number {
   return model.identity.elevation + 90 + (hash % 81);
 }
 
+/** Jet bridges: the short stubs from a terminal's gate face out to each parked
+ * aircraft. Real charts draw them as fine black ticks along the gate frontage,
+ * and they are much of what makes a terminal read as a terminal rather than as
+ * a black blob. Drawn only where a bridge would really exist: regional stands
+ * are commonly walk-out, and stands are skipped entirely when the page scale is
+ * too small for the tick to be legible. */
+function jetBridgesLayer(model: SiteModel, projection: Projection): string {
+  const terminalStands = model.stands.filter((stand) => stand.ownerId.startsWith("comp-"));
+  if (terminalStands.length === 0) return "";
+  let out = `<g id="jet-bridges" stroke="${BLACK}" stroke-linecap="butt" fill="none" stroke-width="0.5">`;
+  let drawn = 0;
+  for (const stand of terminalStands) {
+    if (stand.aircraftClass === "regional") continue;
+    // The bridge spans from the building face to the aircraft nose: the stand
+    // centre lies half a depth off the face, so the stub runs back along facing.
+    const reach = stand.depth * 0.42;
+    const root = { x: stand.center.x + stand.facing.x * reach, y: stand.center.y + stand.facing.y * reach };
+    const a = projection.point(root);
+    const b = projection.point(stand.center);
+    // Below ~1.5pt the tick is indistinguishable from chart noise.
+    if (Math.hypot(b.x - a.x, b.y - a.y) < 1.5) continue;
+    out += `<line x1="${num(a.x)}" y1="${num(a.y)}" x2="${num(b.x)}" y2="${num(b.y)}"/>`;
+    drawn++;
+  }
+  out += `</g>`;
+  return drawn > 0 ? out : "";
+}
+
 function buildingsLayer(model: SiteModel, projection: Projection, placer: LabelPlacer, fonts: FontScale): string {
   let out = `<g id="buildings" fill="${BLACK}" stroke="none">`;
   for (const building of model.buildings) {
@@ -832,7 +860,9 @@ function buildingsLayer(model: SiteModel, projection: Projection, placer: LabelP
     const box = bounds(building.polygon.map((p) => projection.point(p)));
     placer.reserve({ x: box.minX - 1, y: box.minY - 1, w: box.maxX - box.minX + 2, h: box.maxY - box.minY + 2 });
   }
-  out += `</g><g id="building-labels" class="thin">`;
+  out += `</g>`;
+  out += jetBridgesLayer(model, projection);
+  out += `<g id="building-labels" class="thin">`;
 
   // Tower and beacon are independent facts: the star and the BCN line appear with
   // the tower only when the model records collocation.

@@ -602,6 +602,16 @@ function buildDistricts(rng: RNG, role: Role, archetype: TerminalArchetype, head
         roadCourts: complex.system.roadCourts.map(mapPoly),
         accretion: complex.system.accretion,
         gatesPlanned: complex.system.gatesPlanned,
+        // A link between sibling terminals is only real if it can actually be
+        // built: structure never crosses a runway. The terminal builder records
+        // the candidate; the veto needs the world frame and the runway set, so
+        // it lands here.
+        links: complex.system.links
+          .map((link) => ({ ...link, points: link.points.map(toWorld) }))
+          .filter((link) => !runways.some((runway) => {
+            const [ra, rb] = runwayEndpoints(runway.center, runway.heading, runway.length);
+            return segmentIntersection(link.points[0]!, link.points[1]!, ra, rb) !== null;
+          })),
       };
       stands.push(...complex.stands.map((stand) => ({ ...stand, center: toWorld(stand.center), facing: mapDir(stand.facing) })));
       taxilanes.push(...complex.taxilanes.map((lane) => ({ ...lane, points: lane.points.map(toWorld) })));
