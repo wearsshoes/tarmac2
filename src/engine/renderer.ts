@@ -850,11 +850,14 @@ function buildingsLayer(model: SiteModel, projection: Projection, placer: LabelP
       if (beaconOnTower) out += text(placed.point.x, placed.point.y + fonts.minor + 1, "BCN", `class="minor halo" text-anchor="middle" font-size="${fonts.minor}"`);
       continue;
     }
-    // Building labels drop entirely on collision (tiered policy) — but try a ring first.
-    const placed = placer.try(anchor, building.label, fonts.minor, RING.map((o) => ({ x: o.x * 1.6, y: o.y * 1.4 })));
-    if (!placed) continue;
-    if (placed.leader) out += leaderPath(placer, anchor, { x: placed.point.x, y: placed.point.y + 2 });
-    out += text(placed.point.x, placed.point.y, building.label, `class="minor halo" text-anchor="middle" font-size="${fonts.minor}"`);
+    // Terminal buildings are always identified (leader if needed); other
+    // building labels drop entirely on collision (tiered policy).
+    const ring = [1.6, 2.4, 3.4].flatMap((factor) => RING.map((o) => ({ x: o.x * factor, y: o.y * factor * 0.9 })));
+    const placed = placer.try(anchor, building.label, fonts.minor, ring);
+    if (!placed && building.kind !== "terminal") continue;
+    const point = placed?.point ?? placer.forceBest(anchor, building.label, fonts.minor, ring);
+    if (!placed || placed.leader) out += leaderPath(placer, anchor, { x: point.x, y: point.y + 2 });
+    out += text(point.x, point.y, building.label, `class="minor halo" text-anchor="middle" font-size="${fonts.minor}"`);
   }
 
   // Standalone rotating beacon: star symbol + BCN label away from the tower.
@@ -982,8 +985,10 @@ function hotspotLayer(model: SiteModel, projection: Projection, placer: LabelPla
   let out = `<g id="hotspots" fill="none" stroke="${BROWN}" class="hotspot">`;
   for (const [index, hotspot] of model.hotspots.entries()) {
     const p = projection.point(hotspot.point);
-    const rx = Math.max(7, projection.distance(hotspot.rx));
-    const ry = Math.max(5.4, rx * 0.78 * (hotspot.ry / hotspot.rx / 0.78));
+    // HS ellipses are chart symbols, not ground footprints: cap the page size
+    // so compact GA sheets don't inflate them into monster ovals.
+    const rx = Math.min(16, Math.max(7, projection.distance(hotspot.rx)));
+    const ry = Math.min(12, Math.max(5.4, rx * 0.78 * (hotspot.ry / hotspot.rx / 0.78)));
     const pageAngle = fold((Math.atan2(projection.direction(polar(hotspot.angle)).y, projection.direction(polar(hotspot.angle)).x) * 180) / Math.PI);
     out += `<ellipse cx="${num(p.x)}" cy="${num(p.y)}" rx="${num(rx)}" ry="${num(ry)}" transform="rotate(${num(pageAngle)} ${num(p.x)} ${num(p.y)})"/>`;
     // Boxed label up-and-right, vertical side alternating by index.

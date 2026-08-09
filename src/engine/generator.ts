@@ -106,16 +106,19 @@ function pcnString(length: number, rng: RNG): string {
   return `PCN ${value} ${rng.pick(["R", "R", "F"])}/${rng.pick(["A", "B", "B", "C"])}/${rng.pick(["W", "X"])}/${rng.pick(["T", "U"])}`;
 }
 
-function makeEnds(rng: RNG, identity: Identity, heading: number, number: number, suffix: string, big: boolean): [RunwayEnd, RunwayEnd] {
+function makeEnds(rng: RNG, identity: Identity, heading: number, number: number, suffix: string, length: number): [RunwayEnd, RunwayEnd] {
   const mirror = (s: string) => (s === "L" ? "R" : s === "R" ? "L" : s);
+  const big = length > 9000;
   const makeEnd = (designator: string, mag: number): RunwayEnd => {
     const emas = big && rng.chance(0.2) ? snap(rng.float(300, 600), 50) : 0;
+    // End features stay proportionate: a short strip never grows a blast pad
+    // half its own length.
     return {
       designator,
       elevation: Math.round(identity.elevation - Math.abs(rng.gauss(0, 7))),
       magneticHeading: Math.round((((mag % 360) + 360) % 360) * 10) / 10,
-      displaced: rng.chance(0.22) ? snap(rng.float(200, 900), 50) : 0,
-      blastPad: !emas && rng.chance(0.28) ? snap(rng.float(200, 1000), 100) : 0,
+      displaced: rng.chance(0.22) ? snap(Math.min(rng.float(200, 900), length * 0.13), 50) : 0,
+      blastPad: !emas && rng.chance(0.28) ? snap(Math.min(rng.float(200, 1000), length * 0.16), 100) : 0,
       emas,
     };
   };
@@ -808,7 +811,8 @@ function deriveHotspots(runways: Runway[], taxiways: Taxiway[], role: Role, rng:
     for (const t of [0.04, 0.96]) candidates.push({ point: pointAlong(a, b, t), risk: 1, angle: runway.heading, reason: "THRESHOLD CLUSTER", elongation: 1.2 });
   }
   candidates.sort((one, two) => two.risk - one.risk);
-  const limit = role === "mega-hub" ? rng.int(4, 7) : role === "major-hub" ? rng.int(3, 5) : role === "mid-hub" ? rng.int(2, 3) : role === "basic-ga" ? 1 : rng.int(1, 2);
+  // Small GA fields usually chart no hot spots at all (KITH pattern).
+  const limit = role === "mega-hub" ? rng.int(4, 7) : role === "major-hub" ? rng.int(3, 5) : role === "mid-hub" ? rng.int(2, 3) : role === "basic-ga" ? (rng.chance(0.35) ? 1 : 0) : rng.int(0, 2);
   const picked: Candidate[] = [];
   for (const candidate of candidates) {
     if (picked.length >= limit) break;
@@ -918,7 +922,7 @@ export function generate(seed: string, options: GenerateOptions = {}): SiteModel
   const layout = root.derive("layout");
 
   const role = options.role ?? root.pick(ROLES);
-  const identity = makeIdentity(identityRng, options.region);
+  const identity = makeIdentity(identityRng, options.region, role);
   const design = designFor(role);
   const cfg = ROLE[role];
   const hub = role.includes("hub");
@@ -970,7 +974,7 @@ export function generate(seed: string, options: GenerateOptions = {}): SiteModel
         const runwayRng = layout.derive(`runway-${runwayKey}`);
         const length = snap(Math.min(14000, primaryLength * slot.lengthScale), 50);
         const suffix = suffixes[lowFirst ? i : ordered.length - 1 - i] ?? "";
-        const ends = makeEnds(runwayRng, identity, familyHeading, number, suffix, length > 9000);
+        const ends = makeEnds(runwayRng, identity, familyHeading, number, suffix, length);
         runways.push({
           id: `${ends[0].designator}-${ends[1].designator}`,
           center: add(origin, familyFrame.at(slot.u, slot.w)), heading: familyHeading, length,
@@ -1010,7 +1014,7 @@ export function generate(seed: string, options: GenerateOptions = {}): SiteModel
     const crossingU = crossRng.pick([1, -1]) * crossRng.float(0.24, 0.38) * primaryLength;
     const center = add(at(crossingU, 0), scale(polar(crossHeading), crossRng.float(-0.12, 0.12) * crossLength));
     const number = runwayNumber(crossHeading, identity.variation);
-    const ends = makeEnds(crossRng.derive("ends"), identity, crossHeading, number, "", false);
+    const ends = makeEnds(crossRng.derive("ends"), identity, crossHeading, number, "", crossLength);
     runways.push({
       id: `${ends[0].designator}-${ends[1].designator}`,
       center, heading: crossHeading, length: crossLength,
@@ -1035,7 +1039,7 @@ export function generate(seed: string, options: GenerateOptions = {}): SiteModel
     const keepsData = lifecycle === "closed-indefinite";
     const number = runwayNumber(closedHeading, identity.variation);
     const ends = keepsData
-      ? makeEnds(legacyRng.derive("ends"), identity, closedHeading, number, "", false)
+      ? makeEnds(legacyRng.derive("ends"), identity, closedHeading, number, "", closedLength)
       : ([
         { designator: "", elevation: identity.elevation, magneticHeading: 0, displaced: 0, blastPad: 0, emas: 0 },
         { designator: "", elevation: identity.elevation, magneticHeading: 0, displaced: 0, blastPad: 0, emas: 0 },
@@ -1195,10 +1199,21 @@ export function generate(seed: string, options: GenerateOptions = {}): SiteModel
     }
   }
 
+  // Located symbols sit in open ground: clear of runway corridors, RPZs, and
+  // every district apron/building footprint.
+  const clearOfPolygon = (p: Point, polygon: Point[], margin: number): boolean => {
+    if (pointInPolygon(p, polygon)) return false;
+    for (let i = 0; i < polygon.length; i++) {
+      if (pointSegmentDistance(p, polygon[i]!, polygon[(i + 1) % polygon.length]!) < margin) return false;
+    }
+    return true;
+  };
   const clearPoint = (p: Point, margin: number): boolean => runways.every((r) => {
     const [ra, rb] = runwayEndpoints(r.center, r.heading, r.length);
     return pointSegmentDistance(p, ra, rb) > margin + r.width / 2;
-  }) && zones.every((zone) => !pointInPolygon(p, zone));
+  }) && zones.every((zone) => !pointInPolygon(p, zone))
+    && districts.aprons.every((apron) => clearOfPolygon(p, apron.polygon, 180))
+    && safeBuildings.every((building) => clearOfPolygon(p, building.polygon, 180));
 
   const wanted: string[] = [];
   const want = (name: string, p: number): void => { if (featureRng.chance(p)) wanted.push(name); };
@@ -1206,7 +1221,7 @@ export function generate(seed: string, options: GenerateOptions = {}): SiteModel
   want("declared-distances", hub ? 0.8 : role === "regional" ? 0.45 : 0);
   want("wind-cone", role === "basic-ga" || role === "business-ga" ? 0.9 : role === "regional" ? 0.5 : 0.15);
   want("helipad", hub ? 0.3 : role === "business-ga" ? 0.22 : 0.12);
-  want("deice", hub ? 0.55 : 0);
+  want("deice", hub ? 0.55 : role === "regional" ? 0.18 : 0);
   want("non-movement", 0.25);
   want("hotspot-table", hub ? 0.6 : 0.3);
   const families = new Set(featureRng.shuffle(wanted).slice(0, hub ? 4 : 3));
@@ -1237,7 +1252,7 @@ export function generate(seed: string, options: GenerateOptions = {}): SiteModel
     if (site) helipads.push(site);
   }
 
-  if (families.has("deice") && hub) {
+  if (families.has("deice")) {
     // Deice pads sit on departure routes: beside the parallel near a primary end.
     const primaryRunway = activeRunways[0]!;
     const [pa, pb] = runwayEndpoints(primaryRunway.center, primaryRunway.heading, primaryRunway.length);

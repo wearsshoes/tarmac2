@@ -274,6 +274,9 @@ export function buildTerminal(rng: RNG, role: Role, archetypePrior: TerminalArch
         accretion.push({ op: "infill-processor", componentId: "comp-processor-0", cause: cause() });
       }
     }
+    // A single linear frontage tops out around 2,400 ft; larger programs
+    // degrade to fewer stands rather than an implausible mile-long bar.
+    length = Math.min(length, 2400);
     const infilled = accretion.some((op) => op.op === "infill-processor");
     addUnit(0, 0, "TERMINAL", length, depth);
     const poly = infilled ? bar(0, 0, length, depth) : notchedBox(0, 0, length, depth);

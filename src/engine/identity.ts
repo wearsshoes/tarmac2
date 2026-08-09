@@ -122,7 +122,7 @@ function airacWindow(rng: RNG): string {
   return `${fmt(start)} to ${fmt(end)}`;
 }
 
-export function makeIdentity(rng: RNG, requestedRegion?: string): Identity {
+export function makeIdentity(rng: RNG, requestedRegion?: string, role = "regional"): Identity {
   const regionKey = requestedRegion && REGIONS[requestedRegion] ? requestedRegion : rng.pick(REGION_KEYS);
   const region = REGIONS[regionKey]!;
   const box = rng.weighted(region.prefixes.map((p) => [p, p.weight] as const));
@@ -135,15 +135,20 @@ export function makeIdentity(rng: RNG, requestedRegion?: string): Identity {
   const territory = rng.pick(region.territories);
   const codes = deriveCodes(city, box.prefix, rng);
 
-  // Name-style roll: 55% INTL, 20% RGNL, 15% RGNL - SURNAME FLD, 10% SURNAME FLD / MUNI.
+  // Name style follows the role: hubs read INTL, GA fields read MUNI/FLD —
+  // a 2,800-ft strip named INTL breaks the sheet's plausibility.
   const cityCaps = city.toUpperCase();
   const surname = rng.pick(region.surnames);
   const styleRoll = rng.next();
-  const airportName =
-    styleRoll < 0.55 ? `${cityCaps} INTL` :
-    styleRoll < 0.75 ? `${cityCaps} RGNL` :
-    styleRoll < 0.9 ? `${cityCaps} RGNL - ${surname} FLD` :
-    rng.chance(0.5) ? `${surname} FLD` : `${cityCaps} MUNI`;
+  const smallRoll = rng.next();
+  const smallName = smallRoll < 0.5 ? `${cityCaps} MUNI` : `${surname} FLD`;
+  const hub = role.includes("hub");
+  const ga = role === "basic-ga" || role === "business-ga";
+  const airportName = hub
+    ? (styleRoll < 0.7 ? `${cityCaps} INTL` : styleRoll < 0.85 ? `${cityCaps} RGNL` : `${cityCaps} RGNL - ${surname} FLD`)
+    : ga
+      ? (styleRoll < 0.45 ? smallName : styleRoll < 0.7 ? `${cityCaps} RGNL` : styleRoll < 0.85 ? `${cityCaps} RGNL - ${surname} FLD` : `${cityCaps} INTL`)
+      : (styleRoll < 0.25 ? `${cityCaps} INTL` : styleRoll < 0.65 ? `${cityCaps} RGNL` : styleRoll < 0.85 ? `${cityCaps} RGNL - ${surname} FLD` : smallName);
 
   // Magnetic variation from longitude: positive = east, negative = west.
   let variation = (region.agonic - lon) * 0.25 + rng.gauss(0, 2);

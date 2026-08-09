@@ -37,10 +37,11 @@ describe("located features and furniture families", () => {
     for (let i = 0; i < 80; i++) {
       const model = generate(`feature-${i}`);
       const hub = model.role.includes("hub");
-      // Deice pads are hub-only and labeled with leaders via the apron machinery.
+      // Deice pads appear at hubs (and occasionally regionals — KITH pattern),
+      // never at GA fields, labeled via the apron machinery.
       const deice = model.aprons.filter((apron) => apron.kind === "deice");
       if (deice.length > 0) {
-        expect(hub).toBeTrue();
+        expect(hub || model.role === "regional").toBeTrue();
         for (const pad of deice) expect(pad.label).toBe("DEICE PAD");
       }
       // Declared distances never at basic GA.
