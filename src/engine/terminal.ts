@@ -78,6 +78,58 @@ function bar(u0: number, v0: number, length: number, width: number): UV[] {
   ]);
 }
 
+/** Rotate a polygon about a pivot — the geometric half of accretion. A pier that
+ * grew toward a different apron isn't parallel to its neighbors. */
+function rotateAbout(poly: UV[], pivot: UV, angle: number): UV[] {
+  const cos = Math.cos(angle);
+  const sin = Math.sin(angle);
+  return poly.map((p) => {
+    const du = p.u - pivot.u;
+    const dv = p.v - pivot.v;
+    return { u: pivot.u + du * cos - dv * sin, v: pivot.v + du * sin + dv * cos };
+  });
+}
+
+/** A finger that changes direction partway out: straight from the root to the
+ * knee, then swung by `angle` for the remainder. Real piers bend where a later
+ * phase chased a different apron edge (ORD C, DFW E) — a single dogleg reads as
+ * built history, where a rectangle reads as a diagram. */
+function kinkedFinger(u0: number, root: number, length: number, width: number, knee: number, angle: number): UV[] {
+  const kneeV = root + length * knee;
+  const dirU = Math.sin(angle);
+  const dirV = Math.cos(angle);
+  const rest = length * (1 - knee);
+  const tipU = u0 + dirU * rest;
+  const tipV = kneeV + dirV * rest;
+  // Half-width offsets: axis-aligned to the knee, then normal to the swung leg.
+  const nU = dirV * (width / 2);
+  const nV = -dirU * (width / 2);
+  return ccw([
+    { u: u0 - width / 2, v: root }, { u: u0 + width / 2, v: root },
+    { u: u0 + width / 2, v: kneeV }, { u: tipU + nU, v: tipV + nV },
+    { u: tipU - nU, v: tipV - nV }, { u: u0 - width / 2, v: kneeV },
+  ]);
+}
+
+/** A linear terminal whose second phase followed the apron edge instead of the
+ * original axis: two wings meeting at the centerline, so both the airside face
+ * and the landside curb read as a shallow V rather than one straight line. */
+function bentBar(length: number, depth: number, angle: number): UV[] {
+  const half = length / 2;
+  const dirU = Math.cos(angle);
+  const dirV = Math.sin(angle);
+  // Right wing tip, swung; left wing stays on the axis.
+  const tipU = dirU * half;
+  const tipV = dirV * half;
+  const nU = -dirV * (depth / 2);
+  const nV = dirU * (depth / 2);
+  return ccw([
+    { u: -half, v: -depth / 2 }, { u: 0, v: -depth / 2 },
+    { u: tipU + nU, v: tipV + nV }, { u: tipU - nU, v: tipV - nV },
+    { u: 0, v: depth / 2 }, { u: -half, v: depth / 2 },
+  ]);
+}
+
 /** Arc band for curved terminals: chord half-length h, sag s → R = (h²+s²)/2s.
  * Convex side faces +v (airside). */
 function arcBand(u0: number, v0: number, chord: number, sag: number, width: number): UV[] {
@@ -265,11 +317,17 @@ export function buildTerminal(rng: RNG, role: Role, archetypePrior: TerminalArch
     const gateClass = faceClass(dimsRng, program.mix);
     let length = Math.max(700, program.gates * PITCH[gateClass] * dimsRng.float(1, 1.15));
     const depth = processorDepthFor(dimsRng.float(170, 260));
+    let bend = 0;
     const ops = accretionRng.int(2, 3);
     for (let i = 0; i < ops; i++) {
-      if (accretionRng.chance(0.5)) {
+      const roll = accretionRng.next();
+      if (roll < 0.4) {
         length *= accretionRng.float(1.12, 1.25);
         accretion.push({ op: "lengthen", componentId: "comp-processor-0", cause: cause() });
+      } else if (roll < 0.7 && bend === 0) {
+        // The extension followed the apron edge rather than the original axis.
+        bend = accretionRng.float(0.09, 0.2) * (accretionRng.chance(0.5) ? 1 : -1);
+        accretion.push({ op: "kink", componentId: "comp-processor-0", cause: cause() });
       } else {
         accretion.push({ op: "infill-processor", componentId: "comp-processor-0", cause: cause() });
       }
@@ -279,7 +337,10 @@ export function buildTerminal(rng: RNG, role: Role, archetypePrior: TerminalArch
     length = Math.min(length, 2400);
     const infilled = accretion.some((op) => op.op === "infill-processor");
     addUnit(0, 0, "TERMINAL", length, depth);
-    const poly = infilled ? bar(0, 0, length, depth) : notchedBox(0, 0, length, depth);
+    // A bent linear terminal is two collinear-rooted wings meeting at the
+    // centerline: the airside face becomes a shallow V, so the gate band and
+    // the stand row follow it instead of lying on one straight line.
+    const poly = bend !== 0 ? bentBar(length, depth, bend) : infilled ? bar(0, 0, length, depth) : notchedBox(0, 0, length, depth);
     comps.push(makeComp("comp-processor-0", "unit-0", "processor", "attached", poly, { ...processorRule("gate-face"), gateClass }, "TERMINAL", "terminal"));
     if (detailRng.chance(0.35)) {
       const stubU = (detailRng.chance(0.5) ? 1 : -1) * length * 0.32;
@@ -289,7 +350,7 @@ export function buildTerminal(rng: RNG, role: Role, archetypePrior: TerminalArch
     const hub = role.includes("hub");
     let processorLength = hub ? dimsRng.float(1100, 1700) : dimsRng.float(800, 1200);
     const processorDepth = processorDepthFor(dimsRng.float(200, 300));
-    interface PierSpec { length: number; width: number; cap: "none" | "tee" | "pod" | "rotunda"; gateClass: AircraftClass; detached: boolean; connection: ComponentConnection }
+    interface PierSpec { length: number; width: number; cap: "none" | "tee" | "pod" | "rotunda"; gateClass: AircraftClass; detached: boolean; connection: ComponentConnection; skew: number; kink: number }
     const pierCount = Math.max(1, Math.min(6, Math.round(program.gates / (hub ? 24 : 12))));
     const piers: PierSpec[] = Array.from({ length: pierCount }, (_, i) => ({
       length: (hub ? dimsRng.float(900, 1500) : dimsRng.float(650, 1050)) * (i % 2 ? 0.85 : 1),
@@ -298,26 +359,38 @@ export function buildTerminal(rng: RNG, role: Role, archetypePrior: TerminalArch
       gateClass: faceClass(dimsRng, program.mix),
       detached: false,
       connection: "attached",
+      skew: 0,
+      kink: 0,
     }));
     // Accretion: growth ops recorded with causes, giving earned irregularity.
     const ops = accretionRng.int(2, 4);
     for (let i = 0; i < ops; i++) {
       const roll = accretionRng.next();
-      if (roll < 0.35 && piers.length > 0) {
+      if (roll < 0.28 && piers.length > 0) {
         const idx = accretionRng.int(0, piers.length - 1);
         piers[idx]!.length *= accretionRng.float(1.15, 1.3);
         accretion.push({ op: "lengthen", componentId: `comp-pier-${idx}`, cause: cause() });
-      } else if (roll < 0.55) {
+      } else if (roll < 0.44) {
         piers.push({
           length: dimsRng.float(700, 1200), width: dimsRng.float(100, 150),
           cap: "none", gateClass: faceClass(accretionRng, program.mix), detached: false, connection: "attached",
+          skew: 0, kink: 0,
         });
         accretion.push({ op: "add-pier", componentId: `comp-pier-${piers.length - 1}`, cause: cause() });
-      } else if (roll < 0.75) {
+      } else if (roll < 0.58) {
+        // Outer piers swing off-axis: the later phase chased a different apron.
+        const idx = accretionRng.chance(0.7) ? piers.length - 1 : accretionRng.int(0, piers.length - 1);
+        piers[idx]!.skew = accretionRng.float(0.1, 0.28) * (accretionRng.chance(0.5) ? 1 : -1);
+        accretion.push({ op: "skew", componentId: `comp-pier-${idx}`, cause: cause() });
+      } else if (roll < 0.7) {
+        const idx = accretionRng.int(0, piers.length - 1);
+        piers[idx]!.kink = accretionRng.float(0.14, 0.34) * (accretionRng.chance(0.5) ? 1 : -1);
+        accretion.push({ op: "kink", componentId: `comp-pier-${idx}`, cause: cause() });
+      } else if (roll < 0.82) {
         const idx = accretionRng.int(0, piers.length - 1);
         piers[idx]!.cap = accretionRng.pick(["tee", "pod", "rotunda"] as const);
         accretion.push({ op: "cap-pier", componentId: `comp-pier-${idx}`, cause: cause() });
-      } else if (roll < 0.9 && hub) {
+      } else if (roll < 0.92 && hub) {
         const idx = piers.length - 1;
         piers[idx]!.detached = true;
         piers[idx]!.connection = accretionRng.pick(["bridge", "bridge", "tunnel", "at-grade"] as const);
@@ -338,16 +411,34 @@ export function buildTerminal(rng: RNG, role: Role, archetypePrior: TerminalArch
     piers.forEach((pier, i) => {
       const u = (i - (piers.length - 1) / 2) * maxPitch + detailRng.float(-60, 60);
       const root = pier.detached ? processorDepth / 2 + 160 : processorDepth / 2;
-      const poly = ccw([
-        { u: u - pier.width / 2, v: root }, { u: u + pier.width / 2, v: root },
-        { u: u + pier.width / 2, v: root + pier.length }, { u: u - pier.width / 2, v: root + pier.length },
-      ]);
+      // Geometry follows the recorded ops: kink first (dogleg about the knee),
+      // then skew (whole finger rotated about its root).
+      const knee = pier.kink !== 0 ? detailRng.float(0.45, 0.65) : 1;
+      let poly = pier.kink !== 0
+        ? kinkedFinger(u, root, pier.length, pier.width, knee, pier.kink)
+        : ccw([
+          { u: u - pier.width / 2, v: root }, { u: u + pier.width / 2, v: root },
+          { u: u + pier.width / 2, v: root + pier.length }, { u: u - pier.width / 2, v: root + pier.length },
+        ]);
+      if (pier.skew !== 0) poly = rotateAbout(poly, { u, v: root }, pier.skew);
+      // Where the finger actually ends, after both ops — the cap must follow it.
+      const tip = (() => {
+        const kneeV = root + pier.length * knee;
+        const rest = pier.length * (1 - knee);
+        const raw = pier.kink !== 0
+          ? { u: u + Math.sin(pier.kink) * rest, v: kneeV + Math.cos(pier.kink) * rest }
+          : { u, v: root + pier.length };
+        return pier.skew !== 0 ? rotateAbout([raw], { u, v: root }, pier.skew)[0]! : raw;
+      })();
+      const tipAngle = pier.kink + pier.skew;
       comps.push(makeComp(`comp-pier-${i}`, "unit-0", pier.detached ? "satellite" : "pier", pier.detached ? pier.connection : "attached", poly, pierRule(pier.gateClass), `CONCOURSE ${CONCOURSE_LETTERS[i]}`, "concourse"));
       if (pier.detached && pier.connection === "bridge") {
         comps.push(makeComp(`comp-connector-${i}`, "unit-0", "connector", "bridge", bar(u, processorDepth / 2 + 80, 45, 160), connectorRule, "", "concourse", true, true));
       }
       if (pier.cap !== "none") {
-        const capPoly = pier.cap === "tee" ? bar(u, root + pier.length + 60, detailRng.float(320, 520), 120) : bulge(u - pier.width / 2, u + pier.width / 2, root + pier.length, pier.cap === "rotunda" ? detailRng.float(110, 160) : detailRng.float(75, 110));
+        const capPoly = pier.cap === "tee"
+          ? rotateAbout(bar(tip.u, tip.v + 60, detailRng.float(320, 520), 120), tip, tipAngle)
+          : bulge(tip.u - pier.width / 2, tip.u + pier.width / 2, tip.v, pier.cap === "rotunda" ? detailRng.float(110, 160) : detailRng.float(75, 110));
         comps.push(makeComp(`comp-cap-${i}`, "unit-0", "concourse", "attached", capPoly, serviceRule, `CONCOURSE ${CONCOURSE_LETTERS[i]}`, "concourse", true, true));
       }
     });
@@ -620,6 +711,99 @@ export function buildTerminal(rng: RNG, role: Role, archetypePrior: TerminalArch
       }
     }
   }
+
+  // --- Interstitial infill ---
+  // Gate bands alone leave grass slivers wherever two stand rows face each other
+  // across an alley, or a finger stops short of the collector. Real terminal
+  // aprons are a continuous field: taxiing aircraft need pavement everywhere the
+  // fingers don't stand. These pieces overlap the bands in the same gray, so the
+  // union renders as one field without any polygon boolean (decision 4).
+  //
+  // The airside half-plane starts at the frontmost landside court edge; nothing
+  // below it may be paved, which is what keeps curbs and road courts clean.
+  const courtVs = [...unitSpecs.map((u) => Math.max(...u.court.map((p) => p.v))), ...roadCourts.map((c) => Math.max(...c.map((p) => p.v)))];
+  const vFloor = courtVs.length > 0 ? Math.max(...courtVs) : -Infinity;
+
+  const fillers: UV[][] = [];
+  // 1. Between adjacent fingers: the bay bounded by two neighbouring components,
+  //    from the deeper root out to the collector.
+  // Curvilinear units are processors rather than fingers, but a row of them
+  // encloses the same kind of bay, so they count once there is more than one.
+  const arcRow = comps.filter((c) => c.id.startsWith("comp-arc-"));
+  const fingers = comps
+    .filter((c) => (c.kind === "pier" || c.kind === "concourse" || c.kind === "satellite" || (arcRow.length > 1 && c.id.startsWith("comp-arc-"))) && c.poly.length > 0)
+    .map((c) => ({
+      id: c.id,
+      uMin: Math.min(...c.poly.map((p) => p.u)), uMax: Math.max(...c.poly.map((p) => p.u)),
+      vMin: Math.min(...c.poly.map((p) => p.v)), vMax: Math.max(...c.poly.map((p) => p.v)),
+    }))
+    .sort((a, b) => a.uMin - b.uMin);
+  for (let i = 0; i + 1 < fingers.length; i++) {
+    const a = fingers[i]!;
+    const b = fingers[i + 1]!;
+    const gap = b.uMin - a.uMax;
+    // Only bays wide enough to be pavement rather than a construction joint, and
+    // narrow enough that the space is genuinely enclosed by the two fingers.
+    if (gap < 60 || gap > 2600) continue;
+    const vLow = Math.max(Math.min(a.vMin, b.vMin), vFloor);
+    const vHigh = Math.min(Math.max(a.vMax, b.vMax) + ALLEY, vCollector);
+    if (vHigh - vLow < 80) continue;
+    fillers.push([
+      { u: a.uMax, v: vLow }, { u: b.uMin, v: vLow },
+      { u: b.uMin, v: vHigh }, { u: a.uMax, v: vHigh },
+    ]);
+  }
+  // 1b. Stacked bars (parallel/midfield family) run across u rather than out
+  //     along v, so their bays are the v-gaps between successive bars — the RON
+  //     ramps that fill an ATL midfield between concourse ranks.
+  const stacked = fingers
+    .filter((f) => f.uMax - f.uMin > f.vMax - f.vMin)
+    .sort((a, b) => a.vMin - b.vMin);
+  for (let i = 0; i + 1 < stacked.length; i++) {
+    const a = stacked[i]!;
+    const b = stacked[i + 1]!;
+    const gap = b.vMin - a.vMax;
+    if (gap < 60 || gap > 1400) continue;
+    const left = Math.max(Math.min(a.uMin, b.uMin), uMin);
+    const right = Math.min(Math.max(a.uMax, b.uMax), uMax);
+    if (right - left < 80) continue;
+    fillers.push([
+      { u: left, v: Math.max(a.vMax, vFloor) }, { u: right, v: Math.max(a.vMax, vFloor) },
+      { u: right, v: b.vMin }, { u: left, v: b.vMin },
+    ]);
+  }
+
+  // 2. Finger tips to the collector: the turning area an aircraft needs to swing
+  //    off the last stand and onto the collector.
+  const vertical = fingers.filter((f) => f.vMax - f.vMin >= f.uMax - f.uMin);
+  for (const finger of vertical) {
+    if (vCollector - finger.vMax < 60) continue;
+    fillers.push([
+      { u: finger.uMin - ALLEY / 2, v: Math.max(finger.vMax, vFloor) },
+      { u: finger.uMax + ALLEY / 2, v: Math.max(finger.vMax, vFloor) },
+      { u: finger.uMax + ALLEY / 2, v: vCollector },
+      { u: finger.uMin - ALLEY / 2, v: vCollector },
+    ]);
+  }
+  // 3. Outboard aprons: the pavement beyond the outermost fingers, which is where
+  //    RON and remain-overnight parking actually sits.
+  if (vertical.length > 0) {
+    const first = vertical[0]!;
+    const last = vertical[vertical.length - 1]!;
+    for (const [edge, dir] of [[first.uMin, -1], [last.uMax, 1]] as const) {
+      const vLow = Math.max(Math.min(first.vMin, last.vMin), vFloor);
+      if (vCollector - vLow < 80) continue;
+      // Clamped to the collector span so the outboard apron never overhangs the
+      // pavement the throats actually serve.
+      const outer = Math.max(uMin, Math.min(uMax, edge + dir * 380));
+      if (Math.abs(outer - edge) < 60) continue;
+      fillers.push([
+        { u: edge, v: vLow }, { u: outer, v: vLow },
+        { u: outer, v: vCollector }, { u: edge, v: vCollector },
+      ]);
+    }
+  }
+  fillers.forEach((poly, i) => apronPieces.push({ id: `band-fill-${i}`, poly: ccw(poly) }));
 
   const apronEdgeV = vCollector + COLLECTOR_W / 2;
 

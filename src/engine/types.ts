@@ -190,7 +190,10 @@ export interface Taxilane {
 }
 
 export interface AccretionOp {
-  op: "lengthen" | "add-pier" | "cap-pier" | "detach-satellite" | "infill-processor" | "add-unit";
+  /** `skew` rotates a component off the site axis; `kink` breaks it into a
+   * dogleg. Both are geometric, not dimensional: they are what stops an
+   * accreted terminal from reading as a set of parallel rectangles. */
+  op: "lengthen" | "add-pier" | "cap-pier" | "detach-satellite" | "infill-processor" | "add-unit" | "skew" | "kink";
   componentId: string;
   cause: string;
 }
