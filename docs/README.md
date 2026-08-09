@@ -9,10 +9,10 @@ item cannot silently override the researched design.
 When documents conflict, use this order:
 
 1. [`spec.md`](spec.md) — the product contract: what the generated airport must mean and
-   how the FAA-IAC chart profile must portray it.
+   how the IAC-9 rendering must portray it.
 2. [`edit-plan.md`](edit-plan.md), [`terminal-generator-plan.md`](terminal-generator-plan.md),
    and [`test-suite-spec.md`](test-suite-spec.md) — the coordinated plan for the next code
-   pass.
+   pass (all at revision 2, which records the deliberate scope cuts).
 3. The design and standards references below — evidence and rationale used to interpret
    the spec.
 4. Audit documents — observations about the current implementation and reference corpus.
@@ -99,5 +99,7 @@ superseded by the semantic edge-role and circulation-driven approach.
 - Keep test coverage, fixtures, thresholds, and migration rules in `test-suite-spec.md`.
 - Preserve deterministic seeds, but avoid treating the current SVG bytes or current RNG
   draw order as a permanent design contract.
-- Never infer visual support from the presence of a physical object. Rendering is always
-  selected by an explicit publisher profile.
+- Never infer visual support from the presence of a physical object: the renderer maps
+  model facts to IAC-9 portrayal. There is one publisher target (FAA IAC-9); the
+  publisher-profile framework was deliberately cut — see `edit-plan.md`
+  "Decisions and cuts".

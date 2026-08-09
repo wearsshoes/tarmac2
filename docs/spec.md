@@ -32,11 +32,10 @@ derived, so everything on the sheet stays mutually consistent.
 - **Parcel**: a convex-ish boundary polygon sized to role (GA ≈ few hundred acres;
   constrained urban ≈ 900; greenfield hub ≈ 10,000+). Optionally one or two terrain/
   city edge constraints (a clipped corner, a river edge) that visibly shape the layout.
-- **Development context**: airport era, inherited facilities, buildable sub-area
-  envelopes, roads/transit approach, utility/drainage/perimeter corridors, historic or
-  shoreline constraints, and at least one reserved growth direction for commercial
-  roles. These are causal constraints; render only the subset required by the selected
-  chart profile.
+- **Development context**: airport era, inherited facilities, a landside approach
+  direction, and at least one reserved growth direction for commercial roles. These
+  are causal constraints on layout; they are not rendered. (Utility/drainage/fence
+  networks are deliberately out of scope — see `edit-plan.md` "Decisions and cuts".)
 
 ### A2. Runways
 - Primary runway heading = prevailing wind axis (rounded to a real magnetic number;
@@ -88,13 +87,14 @@ derived, so everything on the sheet stays mutually consistent.
   cargo campus (apart from terminal), military/ANG area (some fields), fuel farm,
   fire stations (1 at GA fields, 2–4 spread mid-field at hubs), remote/RON apron and
   deice pads at hubs, run-up pads near GA runway ends.
-- **Terminal morphology** by role — this is the showpiece; silhouettes must be
-  intricate. (`terminal-design.md` is the authoritative descriptive reference;
-  `terminal-generator-plan.md` defines the next implementation decomposition.) Choose a
-  program and site envelope before an archetype. Generate a typed flow graph connecting
-  landside access, processor, security/FIS as applicable, concourses/gates, baggage and
-  service access, apron taxilanes, taxiway throats, utilities, and emergency access. The
-  building and apron polygons are envelopes of that graph, not independent rectangles.
+- **Terminal morphology** — this is the showpiece; silhouettes must be intricate.
+  (`terminal-design.md` is the authoritative descriptive reference;
+  `terminal-generator-plan.md` defines the implementation decomposition.) Selection is
+  **program- and site-first**: derive a gate-count program and site frame, then choose
+  a morphology family compatible with both; role supplies priors, not the answer. The
+  roles below list *typical outcomes*, not a lookup table. Building and apron polygons
+  are envelopes of a typed component graph (processor, concourses/gates with edge
+  roles, stands, taxilanes, throats), not independent rectangles.
   - GA: none (hangar rows only).
   - Regional: linear slab, maybe one pier (Y/T shapes).
   - Mid-hub: pier terminal, 2–4 concourses, or two unit terminals.
@@ -114,16 +114,16 @@ derived, so everything on the sheet stays mutually consistent.
   small black shape + star when beaconed.
 - Buildings behind the BRL: setbacks grow with building size; nothing in RPZs or
   between hold lines and runways.
-- **Surface semantics are orthogonal.** Every paved or operational surface carries at
-  least: function, material, physical lifecycle, operational availability, and marking
-  state. Hard-surface materials include asphalt, fuel-resistant asphalt, and concrete;
-  soft/alternate surfaces include aggregate-turf, turf, and gravel where applicable.
-  Lifecycle and availability are segment-level, so partial removal, overlay, temporary
-  work, restriction, closure, and repurposing can coexist on one former route.
-- **Site-service systems constrain geometry:** drainage/deicing collection,
-  emergency/perimeter access, utilities, fences/gates, and landside roads remain
-  connected through all generated phases. They need not all render on an FAA Airport
-  Diagram.
+- **Runway lifecycle is an enum, not a boolean.** Each runway carries one of the IAC
+  lifecycle states: active, indefinitely closed, permanently closed, removed-but-
+  pavement-visible, under construction, new-under-construction, repurposed. Each state
+  has a distinct portrayal (B4); none may be encoded as a renderer flag. Material
+  (asphalt vs concrete) and independent marking-state axes are deliberately not
+  modeled — they are invisible under FAA portrayal (`edit-plan.md` "Decisions and
+  cuts").
+- **Landside is negative space with a cause.** Each terminal reserves a landside
+  court (curb/parking side) that is never aircraft apron; a landside approach
+  direction orients it. Road networks, utilities, and fences are not generated.
 
 ### A5. Operational data (derived, chart-facing)
 - Frequencies scale with role: GA = CTAF/UNICOM (+ASOS); towered = ATIS, TOWER,
@@ -173,9 +173,10 @@ derived, so everything on the sheet stays mutually consistent.
   labeled `35°49'N` / `84°00'W` horizontally at line ends; lines pass under pavement.
 
 ### B4. Airfield symbology (IAC-9)
-- The renderer consumes a publisher-neutral airport model plus an explicit FAA-IAC
-  profile. It maps function/material/lifecycle/availability/marking facts to portrayal;
-  it never uses a visual style as the source of operational truth.
+- The renderer targets FAA IAC-9 only (no publisher-profile framework — see
+  `edit-plan.md` "Decisions and cuts"). It maps model facts (function, lifecycle,
+  located assets) to portrayal; it never uses a visual style as the source of
+  operational truth, and no model field exists only to select a drawing style.
 - **Runways**: solid black to-scale bars. Per end: designator rotated to read along
   the runway from approach; `ELEV nnn`; magnetic heading to 0.1° with along-runway
   arrow. One `nnnnn X nnn` dimension per runway. Slope `0.n% UP/DOWN` + arrow where
@@ -190,8 +191,7 @@ derived, so everything on the sheet stays mutually consistent.
 - **Taxiways/aprons**: one flat #CFCFCF; taxiway letters plain black type set along
   the pavement, repeating along long taxiways; connector labels near their stub.
   Non-movement areas may be hatched (diagonal lines) with a legend box. Asphalt,
-  concrete, and fuel-resistant surface courses remain the same gray unless an explicitly
-  selected non-FAA publisher profile distinguishes materials.
+  concrete, and fuel-resistant surface courses all render as the same gray.
 - **Buildings**: solid black silhouettes. Labels generic (`TERMINAL`, `HANGAR`, `FBO`,
   `CARGO RAMP`, `GENERAL AVIATION PARKING`, `FIRE STATION`, `FUEL FARM`, `ANG`),
   with thin straight leaders — forked when one label serves several shapes. `TWR nnnn`
