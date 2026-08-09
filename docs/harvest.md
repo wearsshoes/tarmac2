@@ -237,23 +237,28 @@ and graticule always agree.
 - Font scale two-step: normal / dense (dense when px-per-foot < 0.026 or ≥ 5 runways):
   end numbers 10.5/9.5 (bold), headings 7.5/6.5, dims 8/7, ELEV 7/6.5, taxiway letters
   7/6, minor labels 7/6, blast pad 6.5/6.
-- Margin grammar: title 19 bold, airport name 13 bold, city 8.5, AL number 9, chart id
-  8, volume strings 8 rotated ±90 at x = 24 / pageW−24; **top/bottom stacking order
-  mirrors** (chart id above title at top, below at bottom).
+- Margin grammar: title 19 bold, airport name 13 bold, city 8.5, top-only AL number 9,
+  Julian date 8, volume strings 8 rotated ±90 at x = 24 / pageW−24. Top-left stacks
+  Julian date above title; bottom-left stacks title above Julian date. Top-right stacks
+  airport name above city; bottom-right stacks city above airport name.
 
 **Symbol construction:**
-- Displaced-threshold chevrons: page-colored open polylines every 220 *feet* of model
-  space, apex pushed toward the far end, plus a page-colored bar at the displacement line.
-- Closed runway: page-filled bar, 1.2 outline, X's every ~70 page units built from the
-  runway's own basis vectors (they rotate with the runway), "CLOSED INDEFINITELY" along it.
+- Displaced threshold: use the IAC-9 Appendix 1 reference symbol. Do not substitute the
+  physical runway chevron/arrow-paint grammar used for other pavement states.
+- Runway state is not one symbol: indefinitely closed retains runway data and carries its
+  label; permanently closed is an open bar with one X at each end and no ordinary runway
+  data; removed-but-visible closed pavement is screened with repeated X's. Construction
+  and re-purposed states use their separate IAC-9 portrayals.
 - Blast pads: 45°-hatched pattern fill (pattern id namespaced by airport ident), labeled
   `BLAST PAD {len} X {w}`.
 - EMAS: page-filled outlined bed beyond the pad + boxed label with leader + arrowhead.
 - Mag-var assembly: vertical true-north arm with **filled** head; magnetic arm rotated by
   variation with **open V** head; VAR label flipped to the side away from the magnetic
-  arm; epoch + annual-rate lines beneath (derive the rate, don't hardcode).
-- Tower: star glyph (10-point, inner radius 0.42) beside a bold `TWR {elev}` label with
-  leader; tower elevation = field + 90–170 ft (deterministic hash).
+  arm; source-backed epoch + annual-rate lines beneath. A fictional generator may create
+  those facts, but the renderer does not derive them from variation.
+- Tower and beacon are separate source facts. Use the open-center beacon star and
+  `TWR/BCN` only when collocation is explicit; otherwise draw and label the tower or beacon
+  independently and use a leader when it sits on a charted building.
 - Hotspot: ellipse rx = max(7, r×scale), ry = 0.78 rx; boxed brown label up-and-right,
   leader to 72% of the ellipse radius, vertical side alternating by index.
 - Caution block: line 0 bold, line 1 underlined, grows upward from the bottom margin.

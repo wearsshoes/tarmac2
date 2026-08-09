@@ -89,12 +89,12 @@ and in the page identically. Test runner: `bun test`.
 *(recipes: harvest H6 builders)*
 - Frequencies by role (sectored at hubs), ramp tables, PCN strings, hotspot derivation
   at genuinely confusable geometry, LAHSO/ILS-hold placement, notes (ASDE-X, RSL),
-  chart number / AL number / volume-date strings.
+  valid Julian revision date / top-only AL number / volume-date strings.
 
 ## Phase 7 — Renderer (spec Part B)
 *(recipes: harvest H7 text/placer/symbols/constants; punch-list P1, P5, P7, P8)*
-- Sheet: margins, repeated titles, neatline (0.010″), rotated volume strings,
-  landscape mode.
+- Sheet: IAC top/bottom margin topology, neatline (0.010″), rotated volume strings,
+  and an east-west inside-neatline rotation mode.
 - Graticule: solid lines + perpendicular ticks, plain labels (B3).
 - Airfield: runways with full annotation set; pavement union in #CFCFCF; buildings
   black; hotspots #945101 above all ink; symbol library (beacon star, chevrons, EMAS,

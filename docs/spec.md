@@ -78,7 +78,7 @@ derived, so everything on the sheet stays mutually consistent.
 - **Terminal morphology** by role — this is the showpiece; silhouettes must be
   intricate. (`terminal-design.md` is the authoritative reference: configuration
   taxonomy, footprint dimensions, growth patterns, named real silhouettes.)
-  - GA: none (hangar rows only). 
+  - GA: none (hangar rows only).
   - Regional: linear slab, maybe one pier (Y/T shapes).
   - Mid-hub: pier terminal, 2–4 concourses, or two unit terminals.
   - Major/mega: pick among pier ensemble (ORD core), parallel linear concourse ranks
@@ -113,11 +113,15 @@ derived, so everything on the sheet stays mutually consistent.
 ### B1. Sheet
 - Portrait page, white; single neatline border **0.010″** (≈0.78 pt at chart scale);
   planview inside. If the field is predominantly east-west, rotate the sheet
-  (landscape, north to the left, all text rotated with it).
-- Margins (Futura Medium; all caps): top-left small 5-digit chart number above
+  (landscape convention, north to the left, with mapped text and inside-neatline
+  furniture oriented consistently; outer margin/title data remain page-readable as in
+  IAC-9 Appendix 7).
+- Margins (Futura Medium; all caps): top-left valid `YYDDD` Julian revision date above
   **AIRPORT DIAGRAM** (14 pt); top-center `AL-nnn (FAA)`; top-right airport name +
-  `(ID)` (9 pt, ID in Century-Expanded-style caps) over city, state (8 pt). The same
-  four items mirrored below the bottom neatline (name/city order flips). Rotated
+  `(ID)` (9 pt, ID in Century-Expanded-style caps) over city, state (8 pt). Bottom-left
+  repeats **AIRPORT DIAGRAM** with the Julian date below; bottom-right places city/state
+  above airport name + `(ID)`. The `AL-nnn (FAA)` reference appears in the top margin
+  only. Rotated
   volume/date strings (`SE-1, 20 APR 2023 to 18 MAY 2023`) outside both side neatlines.
 - Scale chosen so ≥1 whole minute of latitude fits; the field occupies the middle
   ~50–60% with deliberate white space; text blocks live in the empty quadrants.
@@ -146,7 +150,11 @@ derived, so everything on the sheet stays mutually consistent.
   ≥0.3%. Centerline-light runways get a white dotted line inside the bar. Displaced
   thresholds per legend symbol; blast pads/stopways = chevronned rectangles over
   taxiway-gray; EMAS = open outlined box + label; arresting gear = per legend.
-  Closed runway = open outline + X's, no designators; closed pavement = screened + X's.
+  Permanently closed runway = open outline + one X at each end, with no designators or
+  runway data; pavement removed from the runway database but still physically present =
+  screened pavement + repeated X's along the affected extent. Indefinitely closed,
+  under-construction, re-purposed, and new-under-construction runways are separate states
+  with the distinct IAC-9 portrayals in §§3.5.2.2–3.5.2.4.
 - **Taxiways/aprons**: one flat #CFCFCF; taxiway letters plain black type set along
   the pavement, repeating along long taxiways; connector labels near their stub.
   Non-movement areas may be hatched (diagonal lines) with a legend box.
@@ -166,8 +174,9 @@ derived, so everything on the sheet stays mutually consistent.
 - Comm block: upper-left (or upper-right), facility names + frequencies in fixed
   order (ATIS/D-ATIS → TOWER → GND CON → CLNC DEL → CPDLC/PDC → GND METERING), ★ on
   part-time facilities, boxed `D` beneath when declared distances exist.
-- `FIELD ELEV nnnn` boxed, corner opposite the comm block (or near the high point
-  with a leader/dot).
+- `FIELD ELEV nnnn` boxed near the known highest point on a usable runway, with a
+  .03-inch dot and leader. Place the unleadered box opposite the comm block only when the
+  runway high point cannot be determined.
 - Mag-var assembly in open space: true-north arrow + slanted magnetic arrow,
   `VAR n.n° W` along the slant, `JANUARY 20nn` / `ANNUAL RATE OF CHANGE 0.1° W`.
 - Caution lines bottom (`CAUTION: BE ALERT TO RUNWAY CROSSING CLEARANCES.` +

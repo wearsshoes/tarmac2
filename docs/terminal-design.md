@@ -5,9 +5,16 @@
 - **[AC 5360-13A]** = FAA AC 150/5360-13A, *Airport Terminal Planning* (2018) — verified against the document text
 - **[AC 5300-13B]** = FAA AC 150/5300-13B Chg 1, *Airport Design* (2024), esp. Table 4-1 — verified against the document text
 - **[ROT]** = industry rule of thumb (ACRP Report 25 *Airport Passenger Terminal Planning and Design*, ACRP Report 96 *Apron Planning and Design Guidebook*, IATA ADRM, and common consultant practice)
-- **[Obs]** = approximate value observed/measured from real airport plans and imagery; treat as ±15%
+- **[Obs]** = approximate value observed/measured from real airport plans, imagery, and
+  the 71 checked-in charts cataloged in `terminal-geometry-catalog.md`; treat dimensions
+  as ±15%
 
-On an FAA airport diagram, the terminal complex reads as: **black building footprint** (processor + concourses/satellites) sitting inside a **gray apron polygon**, with the apron edge facing the taxiway system. Everything below is written to make those two shapes, and the gap between them and the runways, come out right.
+On an FAA airport diagram, the terminal complex reads as **one or more black building
+footprints** (processor + concourses/satellites) set into an articulated **gray apron
+system**, with taxilanes, service/road voids, and discrete throats linking it to the
+taxiway network. A single apron polygon is a useful small-airport approximation, not a
+general rule for a hub. Everything below is written to make the building shapes, apron
+negative space, and the gap between them and the runways come out right.
 
 ---
 
@@ -16,17 +23,28 @@ On an FAA airport diagram, the terminal complex reads as: **black building footp
 AC 5360-13A §6.5 recognizes four basic configurations — **linear, pier, satellite, remote (transporter)** — and notes that "many existing and planned airport passenger terminals use a hybrid concept" [AC 5360-13A]. Industry practice adds curvilinear-linear and the unit-terminal pattern as distinct plan-view species.
 
 ### 1.1 Linear
-- **Plan-view geometry:** One long bar. Aircraft park nose-in, perpendicular to the airside face; the landside face carries the curb. The processor and the gate frontage are the *same building*, so the footprint is a single rectangle, typically much longer than deep (aspect ratio 4:1 to 10:1).
+- **Plan-view geometry:** One dominant long bar. Aircraft park nose-in, perpendicular to
+  the airside face; the landside face carries the curb. The processor and gate frontage
+  are the *same building*. A first-phase footprint may be a rectangle, typically much
+  longer than deep (aspect ratio 4:1 to 10:1), but the checked charts usually show width
+  steps, end additions, or shallow gate-side teeth even at small terminals [Obs].
 - **When used:** Small-to-medium O&D airports where walk distances stay manageable; "still ideal for smaller terminals that largely serve O&D activity" [AC 5360-13A §6.5.1].
 - **Gate counts:** ~5–15 gates for a simple linear terminal; up to ~25–40 before walking distance forces a different shape [ROT].
 - **Expansion:** Lengthen the bar at either end ("expansion potential to either side" [AC 5360-13A]); when the site runs out, sprout a stub pier from one end — at which point it becomes a hybrid.
 - **US examples:** San Jose (SJC) and Dallas–Fort Worth cited by the AC itself [AC 5360-13A §6.5.1.3]; also Kansas City (new MCI, 2023), Sacramento (SMF), Ontario (ONT), Ted Stevens Anchorage (ANC) south terminal.
 
 ### 1.2 Curvilinear linear
-- **Plan-view geometry:** A linear terminal bent into an arc or half-ring so more gate frontage fits around a compact landside core. Aircraft park on the **convex** (outer) side; curb and parking sit in the **concave** pocket. Footprint = annular band, typically 60–120 ft deep radially, sweeping 120°–300°.
+- **Plan-view geometry:** A linear terminal bent into an arc, C, or partial ring so more
+  gate frontage fits around a compact landside core. The curb and parking usually occupy
+  the concave pocket and most aircraft park on the convex outer face, but deep units such
+  as DFW can expose usable gate frontage at ends or selected inner faces. Footprint = an
+  annular or horseshoe-like band, typically 60–160 ft deep radially, sweeping 120°–300°;
+  it needs blunt ends and an internal road court to read as a unit terminal [Obs].
 - **When used:** Drive-to-gate era designs (1960s–70s) that minimized curb-to-gate walk; each arc is usually also a *unit terminal*.
 - **Gate counts:** ~15–35 gates per arc [Obs].
-- **Expansion:** Build another arc along the spine road — arcs replicate rather than grow. Infill of the arc ends is common (DFW D).
+- **Expansion:** Build another arc along the spine road, lengthen or thicken an existing
+  arc, or infill its ends. DFW demonstrates conceptual repetition followed by different
+  additions at each unit; arcs do not remain identical [Obs].
 - **US examples:** DFW Terminals A–E (semicircles); old Kansas City MCI's three horseshoes (demolished 2023 — good historical model); LaGuardia's former Central Terminal arc; Newark A/B/C's three-lobed rounded units [Obs].
 
 ### 1.3 Pier (finger)
@@ -41,7 +59,7 @@ AC 5360-13A §6.5 recognizes four basic configurations — **linear, pier, satel
 - **When used:** High-connect hub traffic; "efficient space utilization... typically suitable for airports that have a high percentage of connecting traffic" [AC 5360-13A].
 - **Gate counts:** 20–45 gates per bar/blob; DEN's Concourse B exceeds 70 [Obs].
 - **Expansion:** Lengthen a bar at both ends, or add another parallel bar one apron-module farther out.
-- **US examples (AC-cited):** Atlanta (ATL), Denver (DEN), Chicago O'Hare (T1 Concourse C) [AC 5360-13A §6.5.3.5]. Also IAD midfield concourses, MCO's four X-shaped airsides, TPA's airsides, SEA's N and S satellites, PIT's X, LAS's D and E.
+- **US examples (AC-cited):** Atlanta (ATL), Denver (DEN), Chicago O'Hare (T1 Concourse C) [AC 5360-13A §6.5.3.5]. Also IAD midfield concourses, MCO's four X-shaped airsides, TPA's airsides, SEA's N and S satellites, PIT's X, and LAS Concourse D. LAS E is associated directly with Terminal 3 and should not be used as a second detached-X example [Obs].
 
 ### 1.5 Transporter / remote
 - **Plan-view geometry:** No gate concourse at all — a processor block plus open hardstand apron with rows of aircraft parked remotely; mobile lounges or buses cross the apron. Footprint = one modest building + a very large gray field with aircraft rows. "Uncommon in the United States" [AC 5360-13A §6.5.4].
@@ -53,7 +71,10 @@ AC 5360-13A §6.5 recognizes four basic configurations — **linear, pier, satel
 - **Plan-view geometry:** Multiple self-contained terminals (each with own curb, processor, gates) repeated along a landside spine road or around a loop. Each unit may internally be linear, pier, or satellite. "In a decentralized configuration, multiple terminal processors serve different concourses, piers, or satellite concourses" [AC 5360-13A §6.5.5]; the AC notes dominant carriers often drive this.
 - **Gate counts:** 10–60 per unit; 100–200 for the complex.
 - **Expansion:** Build the next unit on the reserved spine/loop frontage.
-- **US examples:** JFK (5 active units around a loop), LAX (9 units around a U), DFW (units strung on a spine), EWR, SFO (ring of 4), ORD (3 units + T5).
+- **US examples:** JFK (5 charted active passenger units around a loop), LAX (9
+  processor units—T1-T8 + TBIT—around a U, plus the West Gates satellite), DFW (5 units
+  strung on a spine), EWR, SFO (ring of 4), ORD (3 connected core units + detached T5)
+  [Obs].
 
 ### 1.7 Hybrids (the majority of big US airports)
 Common recipes, useful as generator archetypes:
@@ -61,6 +82,24 @@ Common recipes, useful as generator archetypes:
 - **Processor + APM + X-satellites:** MCO, TPA, PIT — compact landside block, thin elevated APM lines to 2–4 chunky satellites 1,500–3,000 ft away.
 - **Linear-midfield:** DTW McNamara, IAD, DEN, ATL — landside headhouse at one edge, long parallel detached bars in the midfield.
 - **Accreted pier-mall:** MSP T1, PHL, CLT — decades of piers grown into a nearly continuous jagged mass.
+
+### 1.8 Counting and classification rules for chart silhouettes
+
+- Count **passenger processors**, not every detached black concourse. ATL has two
+  processors plus seven transverse concourse bars; DEN has one processor plus three
+  midfield bars; SEA has one main terminal plus two satellites [Obs].
+- Do not equate connected components with terminal count. MIA's North, Central, and South
+  sectors are substantially continuous, while an underground-connected satellite is
+  intentionally disconnected in surface plan [Obs].
+- Assign a **primary morphology plus modifiers**. At large airports, “pier,” “linear,” or
+  “satellite” names the dominant component; `pier + satellite`, `unit + curvilinear`, and
+  `linear + shallow piers` are more faithful than forcing one pure category [Obs].
+- The engine's `parallel` archetype is not a separate planning category. It is a rendering
+  subtype of the satellite/midfield-linear system when the bars are detached, or a
+  multi-concourse linear/pier system when they remain surface-connected.
+- A roadway or garage void can split or curve the black silhouette. Likewise, a narrow
+  bridge may connect two pieces without making them one processor. Classification must
+  use the landside/airside relationship, not polygon count alone.
 
 ---
 
@@ -106,13 +145,22 @@ Typical pier/concourse **lengths**: 700–1,500 ft for a mid-size pier; 2,000–
 - **Depth (landside curb face → secure side):** 150–300 ft for small/medium terminals; 300–450 ft for large hubs with recheck halls and mezzanines [ROT/Obs].
 - **Length:** matches required curb + ticket hall: 400–800 ft small, 800–1,500 ft medium, 1,500–2,300 ft mega (ATL domestic, DFW D, DEN Jeppesen ≈ 900 × 240 ft) [Obs].
 - Footprint area sanity check: ~0.08–0.15 sq ft of terminal building per annual enplanement, or ~150–200 sq ft per peak-hour passenger [ROT, ACRP 25].
-- In silhouette the processor is the **thickest, blockiest rectangle** in the complex; concourses are thin appendages of it (attached) or detached bars.
+- In many layouts the processor is the **thickest, blockiest portion** of the complex and
+  concourses are thinner appendages or detached bars. Exceptions matter: curvilinear unit
+  terminals can have no single rectangle, and years of infill can make pier roots or an
+  international concourse as thick as the original processor [Obs].
 
 ### 2.5 Satellite dimensions
-- **Round/drum satellite:** 150–250 ft diameter, 6–10 gates around the rim (classic LAS A/B/C gates, old ORD-style rotunda pier ends) [Obs].
+- **Round/drum satellite:** 150–300 ft diameter, commonly 6–10 gates around the rim.
+  Distinguish a truly detached drum from a rotunda merely capping an attached pier; LAS
+  A/B/C and old ORD-style rotundas are better treated as attached concourse or pier-tip
+  forms, not canonical detached satellites [Obs].
 - **X / cruciform satellite:** overall 600–900 ft tip-to-tip, arm width 60–100 ft, 15–25 gates (MCO airsides, PIT center X ~1,100 ft tip-to-tip) [Obs].
 - **Midfield bar satellite:** the dimensions of §2.3's hub bars: 120–200 ft wide × 2,000–3,500+ ft long, 30–75 gates.
-- **T/H-shaped satellites:** SEA N Sat (~500 × 400 ft L-block), MSP's G pier end. Any compact polygon 400–900 ft across works.
+- **T/H/irregular satellites:** compact satellites may be 400–900 ft across, but the
+  checked SEA chart shows North Satellite as an elongated stepped bar and South Satellite
+  as the more compact block. MSP's G end is attached and is a pier-end hybrid, not a
+  detached satellite [Obs].
 
 ### 2.6 Apron depth from building face to taxilane (the gray band)
 Stack-up, per AC 5300-13B Table 4-1 + AC 5360-13A §7.3.5:
@@ -153,7 +201,14 @@ Phased expansion is the reason real silhouettes look accreted rather than design
 6. **Second unit terminal** — a whole new curb+processor+gates unit appears down the spine road (IAH, DFW D, MSP T2) or across the field.
 7. **Landside consolidation** — later phases often *fill in*: infill between pier roots, headhouse expansions toward the curb, garages replacing surface lots.
 
-**What the accreted result looks like:** a thick landside block with a flat front; an airside edge that is jagged, asymmetric, and multi-generational — fingers of different lengths/widths, one or two detached bars farther out, and leftover apron notches (used for RON parking) between old and new geometry. Symmetric, uniform complexes (DFW, DEN, MCO) are the signature of *master-planned* airports; asymmetric tangles (MSP, PHL, ORD T3) are the signature of accretion. A generator should support both modes.
+**What the accreted result looks like:** usually a thick landside block with a straight or
+gently curved front, and an airside edge that is jagged, asymmetric, and
+multi-generational—fingers of different lengths/widths, one or two detached bars farther
+out, and leftover apron notches between old and new geometry. Master-planned airports
+(DFW, DEN, MCO) retain repetition of concept, but the checked DFW and DEN charts show
+different lengths, end treatments, and later infill rather than exact symmetry. MSP, PHL,
+and ORD T3 are the stronger accretion extreme. A generator should support the spectrum,
+not a binary uniform/messy switch [Obs].
 
 ---
 
@@ -183,12 +238,17 @@ Two patterns [AC 5360-13A §7.5.1 & AC 150/5300-14C]:
 
 ---
 
-## 5. Landside Face — Why the Front of the Silhouette Is Flat
+## 5. Landside Face — Flat Is the Default, Not a Law
 
 - **Curb frontage** wants to be straight or gently curved because it is a roadway: "curbside roadways — located adjacent to the terminal ticket lobby and baggage claim areas... used to drop off and pick up" [AC 5360-13A §8.3]. Vehicles can't serve a jagged edge, so the landside façade is one continuous line the length of the processor. Big airports run **double-level curbs** (departures above arrivals) — same footprint line, so no added plan complexity. Curb length needed ≈ 1.0–1.3 linear ft per design-hour originating passenger, split across levels; practical totals 800–3,000 ft [ROT, ACRP 40/25].
 - **Roadway loop:** the curb road, 2–4 lanes plus bypass lanes (60–120 ft of pavement), parallels the façade, with recirculation ramps at the ends [AC 5360-13A §8.3].
 - **Parking structures** sit directly across the loop from the processor, 150–400 ft from the façade: big clean rectangles ~300 × 600 ft up to ~600 × 1,200 ft, often 2 side by side, aligned parallel to the terminal front [Obs]. In horseshoe/arc layouts (LAX, DFW, old MCI) the garage fills the concave pocket.
-- **Net effect for silhouettes:** the landside edge of the black footprint is a **single long straight (or one-radius curved) line**, with at most a porte-cochère bump; all articulation — fingers, satellites, hammerheads, notches — happens on the airside edge. A generator can enforce: landside edge = 1 segment; airside edge = many segments.
+- **Net effect for silhouettes:** a simple linear processor often has one long straight or
+  gently curved landside edge, while most strong articulation occurs airside. Do **not**
+  enforce one landside segment globally. Unit terminals turn around loop roads (JFK, LAX,
+  SFO), DFW wraps deep courts, and BOS/MIA show stepped additions on both faces. A better
+  generator bias is: landside edge has fewer, longer segments and follows a road curve;
+  airside edge has more, shorter segments and follows gate modules [Obs].
 
 ---
 
@@ -196,14 +256,26 @@ Two patterns [AC 5360-13A §7.5.1 & AC 150/5300-14C]:
 
 As they read on an FAA airport diagram (black shapes on gray apron):
 
-- **ATL** — Two blocky headhouses (domestic west, international east) bracketing **seven detached parallel bars** (T, A–F, each ~2,300–2,600 ft long, ~120–150 ft wide) evenly spaced ~1,000 ft apart, perpendicular tunnel connection invisible: a perfect comb with no spine.
+- **ATL** — Two blocky processors (Domestic and International) bracket **seven transverse
+  concourse bars** (T, A-F). A-E are detached at surface level; T and F are directly
+  associated with the end processors. Bars are similarly oriented but not identical in
+  length or end treatment, and the tunnel connection is invisible: a disciplined rank,
+  not a perfect repeated comb [Obs].
 - **ORD** — A compact core tangle: three unit terminals around a U-shaped landside loop sprouting **Y- and star-shaped piers** in every direction (T1's two long parallel bars — one detached, tunnel-linked; T3's four-finger star), plus a separate angled linear T5 to the southeast.
-- **DFW** — Five **shallow semicircular arcs** (A–E) strung symmetrically along a central north–south spine road, aircraft on the convex faces, garages in the pockets — like parentheses stacked down a centerline, with a newer stub pier (D/high-gates) breaking the purity.
+- **DFW** — Five **deep C/horseshoe units** (A-E) strung along a central north-south
+  spine road, with gates mainly on the convex faces and roads/garages in the concave
+  courts. They repeat a master plan but differ in depth, end additions, and infill; D is
+  the most block-like [Obs].
 - **IAD** — One long thin rectangle (the ~1,240-ft Saarinen headhouse) near the landside edge, and **two very long detached parallel bars** (A/B and C/D midfield concourses, each ~2,000+ ft) floating to its south with no visible connection (AeroTrain tunnels), the whole set parallel and orthogonal to the north–south runway pair.
 - **JFK** — A **ring of five dissimilar unit terminals** around a huge central loop-road-and-parking oval: T4 a long spine with two splayed piers, T5 a crescent behind the preserved TWA drum, T8 a wide block with two stub piers — no two units alike, all pointing gates outward from the ring.
-- **LAX** — Nine unit terminals forming a tight **U (horseshoe) opening east** around the two-level loop road, each a modest block with short piers; TBIT anchors the west end with a detached **midfield satellite bar** farther west, between the paired north and south runway sets.
+- **LAX** — Nine processor units (T1-T8 + TBIT) form a tight **U (horseshoe) opening
+  east** around the two-level loop road; each footprint differs. TBIT anchors the west end,
+  with the long West Gates satellite farther west between the paired runway sets [Obs].
 - **MSP** — The classic **accreted pier-mall**: T1 is an asymmetric spider — two long arms (Concourses A/B) angling southeast, a dense mall of short parallel fingers (C–G) fanning northeast — reading as one continuous jagged mass; a separate compact linear/pier unit (T2) sits across the field.
-- **DEN** — One large square-ish headhouse (Jeppesen, ~900 ft) at the south edge feeding **three identical detached parallel bars** (A, B, C, each 3,000+ ft after extensions) marching north at ~1,500-ft spacing — a ruler-straight comb the runways pinwheel around.
+- **DEN** — One large square-ish headhouse (Jeppesen, ~900 ft) at one edge feeding **three
+  long detached parallel bars** (A, B, C) at broad regular spacing. Later extensions make
+  their lengths and ends visibly unequal, so the governing image is a ruler-straight
+  ordering with phase variation, not three identical bars [Obs].
 
 ---
 

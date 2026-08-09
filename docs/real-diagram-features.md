@@ -11,9 +11,11 @@ examples are noted where they matter.
 ### Sheet & margins
 - Portrait sheet, white background, one rectangular neatline border inset from all edges.
   (Landscape with north to the left exists — ATL, JFK rasters — but 0/4 of the SVG sample.)
-- Top margin, left→right: 5-digit chart number (small) stacked above a very large
+- Top margin, left→right: 5-digit Julian revision date (small) stacked above a very large
   **AIRPORT DIAGRAM** flush left; **AL-nnn (FAA)** centered; airport name + **(ID)** flush
-  right with city, state below it. All repeated (mirrored) below the bottom neatline.
+  right with city, state below it. Bottom-left repeats **AIRPORT DIAGRAM** with the Julian
+  date below; bottom-right shows city/state above airport name + **(ID)**. The `AL-nnn`
+  reference is top-only under current IAC 9.
 - Vertical publication-cycle text rotated ±90° in both side margins, outside the neatline:
   `NC-1, 04 APR 2013 to 02 MAY 2013` (volume code + date window). Appears twice, once per side.
 - All-caps geometric sans throughout (spec: Futura Medium; ~7 pt inside the planview,
