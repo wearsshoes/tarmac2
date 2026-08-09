@@ -202,21 +202,32 @@ function articulatePolygon(poly: UV[], rng: RNG, intensity: number): UV[] {
 }
 
 /** Arc band for curved terminals: chord half-length h, sag s → R = (h²+s²)/2s.
- * Convex side faces +v (airside). */
-function arcBand(u0: number, v0: number, chord: number, sag: number, width: number): UV[] {
+ * Convex side faces +v (airside).
+ *
+ * `wobble` breaks the perfect circle. A crescent terminal is built in phases
+ * against a curved road, not struck with a compass: real ones (DFW, CDG) run
+ * slightly tighter at one end, flatten in the middle, and vary in depth. A
+ * mathematically exact arc is the tell that gave these away as drafted. */
+function arcBand(u0: number, v0: number, chord: number, sag: number, width: number, wobble?: (t: number) => { radius: number; width: number }): UV[] {
   const h = chord / 2;
   const R = (h * h + sag * sag) / (2 * sag);
   const vc = v0 + sag - R;
   const theta = Math.asin(h / R);
   const points: UV[] = [];
-  const steps = 10;
+  const steps = 14;
+  const at = (i: number) => {
+    const t = i / steps;
+    const a = -theta + 2 * theta * t;
+    const w = wobble?.(t) ?? { radius: 0, width: 0 };
+    return { a, R: R + w.radius, half: (width + w.width) / 2 };
+  };
   for (let i = 0; i <= steps; i++) {
-    const a = -theta + (2 * theta * i) / steps;
-    points.push({ u: u0 + Math.sin(a) * (R + width / 2), v: vc + Math.cos(a) * (R + width / 2) });
+    const { a, R: r, half } = at(i);
+    points.push({ u: u0 + Math.sin(a) * (r + half), v: vc + Math.cos(a) * (r + half) });
   }
   for (let i = steps; i >= 0; i--) {
-    const a = -theta + (2 * theta * i) / steps;
-    points.push({ u: u0 + Math.sin(a) * (R - width / 2), v: vc + Math.cos(a) * (R - width / 2) });
+    const { a, R: r, half } = at(i);
+    points.push({ u: u0 + Math.sin(a) * (r - half), v: vc + Math.cos(a) * (r - half) });
   }
   return ccw(points);
 }
@@ -588,15 +599,29 @@ export function buildTerminal(rng: RNG, role: Role, archetypePrior: TerminalArch
       chord = Math.min(chord, 1500);
       const unit = addUnit(index, 0, name, chord * 0.8, 200, form, gates);
       unit.court = place(unit.court);
+      // Phase joints, not a compass sweep: the arc tightens toward one end and
+      // its depth swells where a concourse was widened.
+      const tighten = dimsRng.float(-0.22, 0.22);
+      const swellAt = dimsRng.float(0.25, 0.75);
+      const swell = dimsRng.float(0.15, 0.5);
+      const flat = dimsRng.float(0.06, 0.18);
+      const wobble = (t: number) => ({
+        // Radius drifts linearly end-to-end, plus a gentle mid-span flattening.
+        radius: sag * (tighten * (t - 0.5) * 2 + flat * Math.sin(Math.PI * t)),
+        width: width * swell * Math.exp(-(((t - swellAt) / 0.22) ** 2)),
+      });
       comps.push(makeComp(`comp-processor-${index}`, unitId, "processor", "attached",
-        place(arcBand(0, 0, chord, sag, width)), crescentRule(gateClass), name, "terminal"));
+        place(arcBand(0, 0, chord, sag, width, wobble)), crescentRule(gateClass), name, "terminal"));
       // The lens inside the horseshoe is roadway, never apron.
       const h = chord / 2;
       const R = (h * h + sag * sag) / (2 * sag);
       const vc = sag - R;
       const theta = Math.asin(h / R);
       const court: UV[] = [];
-      const Ri = R - width / 2 - 40;
+      // Clearance covers the wobble's deepest inward excursion, so a tightened
+      // or swollen arc still never sits on its own roadway.
+      const inward = sag * (Math.abs(tighten) + flat) + width * swell * 0.5;
+      const Ri = R - width / 2 - 40 - inward;
       for (let k = 0; k <= 8; k++) {
         const a = -theta * 0.82 + (2 * theta * 0.82 * k) / 8;
         court.push({ u: Math.sin(a) * Ri, v: vc + Math.cos(a) * Ri });

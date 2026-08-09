@@ -682,9 +682,16 @@ function runwayShape(runway: Runway, index: number, projection: Projection, plac
     const stationDeltas = [0, ...Array.from({ length: 19 }, (_, index) => 0.05 + index * 0.05 - preferredT)]
       .sort((one, two) => Math.abs(one) - Math.abs(two));
     const candidates: LinearPlacement[] = [];
-    for (const extra of [0, 5, 10, 15, 20]) for (const delta of stationDeltas) {
+    for (const extra of [0, 5, 10, 15, 20, 27, 35]) for (const delta of stationDeltas) {
       const t = Math.max(0.035, Math.min(0.965, preferredT + delta));
       candidates.push({ point: offset(along(t), preferredSide, distance + extra), t, side: preferredSide, distance: distance + extra });
+    }
+    // Last resort before forcing an overlap: the far side of the runway. The
+    // prescribed side is a strong preference, but a legible label on the wrong
+    // side beats an illegible one on the right side.
+    for (const extra of [0, 8, 16]) for (const delta of stationDeltas) {
+      const t = Math.max(0.035, Math.min(0.965, preferredT + delta));
+      candidates.push({ point: offset(along(t), -preferredSide, distance + extra), t, side: -preferredSide, distance: distance + extra });
     }
     for (const candidate of candidates) if (placer.claim(candidate.point, label, size, foldedAngle)) return candidate;
     const point = placer.forceBest({ x: 0, y: 0 }, label, size, candidates.map((candidate) => candidate.point), foldedAngle);
