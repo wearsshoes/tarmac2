@@ -1,5 +1,10 @@
 # Harvest — proven recipes to port into this engine
 
+> **Legacy recipe catalog.** Reuse these techniques only when they agree with `spec.md`
+> and the active plans. In particular, shape-first terminal composition, one bounding
+> apron, and repeated stepped throat geometry are superseded by
+> `terminal-generator-plan.md`.
+
 Distilled from a depth audit of a previous generation of this project. Everything here
 is written to be implementable standalone; where a number appears, it was tuned by eye
 against real charts and is worth keeping as a starting value. Items are grouped by the

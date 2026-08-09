@@ -1,5 +1,9 @@
 # Punch list — from the first working review of this engine
 
+> **Historical audit.** Several items below have been fixed and others have been
+> superseded by the larger corpus and standards review. Use `edit-plan.md` as the active
+> backlog. This file remains evidence of the first review, not a current status report.
+
 State at review: Phase 0 scaffold complete (pure engine + Vite shell, deterministic
 seeds, CLI renderer, 17 passing tests). Sheet furniture is close to spec. The airfield
 core — Phases 1, 4, 5 — is stubbed. Items ordered by visual impact; each cites the

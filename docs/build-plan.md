@@ -1,5 +1,10 @@
 # TARMAC build plan
 
+> **Historical plan.** This records the original scaffold-to-renderer sequence and is no
+> longer the active backlog. Use `edit-plan.md` for the next code pass,
+> `terminal-generator-plan.md` for terminal/apron work, and `test-suite-spec.md` for
+> verification. `spec.md` remains authoritative.
+
 A single-page web app that procedurally generates one artifact: an FAA-style airport
 diagram for a fictional airport, rendered as SVG, exportable as SVG/PNG. `docs/spec.md`
 governs; Part A = what to generate, Part B = how to draw it. Art project: the only

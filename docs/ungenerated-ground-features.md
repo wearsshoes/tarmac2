@@ -12,6 +12,10 @@ tables and purely informational symbols are covered in `unaddressed-diagram-obje
 in a note is not the same as a mapped object; similarly, a gray rectangle labeled `RAMP`
 does not count as stand, taxilane, or service-road detail.
 
+AC 150/5370-10H confirms that many items below are independent physical installations or
+construction states. That strengthens the case for first-class data, but IAC 9 and the
+publisher profile still decide which are visible on an Airport Diagram.
+
 ## 1. Aircraft stands and gate furniture
 
 These are the most common missing terminal-area features.
@@ -70,6 +74,11 @@ are still absent:
 - Runway shoulder and stopway distinctions; the present blast-pad/EMAS treatment does not
   cover all declared-distance or paved-overrun cases.
 - Construction areas, temporary pavement, barricades, unusable pavement, and phase limits.
+- Physical surface classes and transitions: asphalt, fuel-resistant asphalt, concrete,
+  aggregate-turf, turf, and gravel. The default FAA profile may portray several of these
+  identically, but the airport model should not collapse them.
+- Marking lifecycle separate from pavement lifecycle: new/final, temporary, removed,
+  obscured/ghosted, and absent marking states on otherwise existing pavement.
 
 ## 4. Airfield lighting and visual aids
 

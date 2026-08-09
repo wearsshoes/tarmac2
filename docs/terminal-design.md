@@ -4,6 +4,7 @@
 **Sourcing convention used throughout:**
 - **[AC 5360-13A]** = FAA AC 150/5360-13A, *Airport Terminal Planning* (2018) — verified against the document text
 - **[AC 5300-13B]** = FAA AC 150/5300-13B Chg 1, *Airport Design* (2024), esp. Table 4-1 — verified against the document text
+- **[MWAA DM 2020]** = Metropolitan Washington Airports Authority, *Design Manual* (August 2020) — used for airport-development, operational-continuity, civil-site, and DCA/IAD facility context; it is not a generic terminal-shape standard
 - **[ROT]** = industry rule of thumb (ACRP Report 25 *Airport Passenger Terminal Planning and Design*, ACRP Report 96 *Apron Planning and Design Guidebook*, IATA ADRM, and common consultant practice)
 - **[Obs]** = approximate value observed/measured from real airport plans, imagery, and
   the 71 checked-in charts cataloged in `terminal-geometry-catalog.md`; treat dimensions
@@ -276,6 +277,79 @@ As they read on an FAA airport diagram (black shapes on gray apron):
   long detached parallel bars** (A, B, C) at broad regular spacing. Later extensions make
   their lengths and ends visibly unequal, so the governing image is a ruler-straight
   ordering with phase variation, not three identical bars [Obs].
+
+---
+
+## 7. Terminal shape must be generated from an operating program
+
+The MWAA review sharpens a limitation already visible in the chart corpus: a terminal is
+not first a silhouette. It is the built boundary between several connected systems.
+MWAA's constructability criteria explicitly require continuity of passenger check-in,
+security screening, departures and arrivals, utilities, pedestrian and vehicular access,
+AOA access, and the flows of baggage, cargo, mail, goods, and supplies [MWAA DM 2020].
+Those systems are not all charted, but they should determine the geometry that is.
+
+### 7.1 Program graph
+
+A future terminal generator should start with typed nodes and paths:
+
+- landside arrival: access road, transit station, parking/garage, curb, and processor;
+- passenger processing: check-in, security, international/FIS where applicable, and
+  departures/arrivals circulation;
+- gate system: concourses, gate-bearing faces, gate modules, satellites, and remote stands;
+- baggage and service: make-up/reclaim, tug routes, GSE courts, catering, waste, and
+  maintenance access;
+- aircraft circulation: pushback envelopes, apron taxilanes, collectors, and taxiway
+  throats;
+- emergency and utility access that remains continuous around or beneath the complex.
+
+The black footprint is the envelope of spaces chosen to satisfy the program. The gray
+apron is the envelope of aircraft and service operations. The white landside court is an
+equally intentional output.
+
+### 7.2 Site and growth envelope
+
+MWAA's Master Plan, ALP/ALUP, and Sub-Area Plan hierarchy provides a useful generator
+analogy. Before choosing an archetype, define:
+
+- the buildable terminal district and runway/taxiway clearances;
+- the road/transit approach and a landside court that must remain non-apron;
+- drainage, utility, perimeter, historic, water, terrain, and existing-facility
+  constraints;
+- a first-phase footprint and one or more reserved growth directions;
+- neighboring cargo, support, maintenance, and rental-car districts whose access must not
+  be severed.
+
+Archetype selection follows from that envelope and the airport's traffic program. It is
+not a direct weighted draw from traffic role alone.
+
+### 7.3 Identity and counting correction
+
+Facility names, operating units, and chart silhouettes are different counts. For example,
+MWAA treats the IAD Main Terminal and Concourses A, B, and C/D as named terminal-system
+entities, while the Airport Diagram shows physically detached building masses. For this
+project:
+
+- `terminal` means an independently programmed passenger-processing unit with its own
+  landside access or headhouse;
+- `concourse`, `pier`, and `satellite` are gate-processing components belonging to a
+  terminal even when detached in plan;
+- a slash or combined public name such as `C/D` is an identity relationship, not proof of
+  one or two polygon components;
+- the visual catalog may list several black polygons for one terminal complex, but the
+  generator must preserve their parent/child relationships.
+
+This corrects the implicit assumption that a terminal count can be read directly from the
+number of black building polygons or concourse labels.
+
+### 7.4 Phasing and inherited irregularity
+
+An airport-era model should create a master-planned base, apply a small number of
+expansion or replacement phases, and retain the consequences. Each phase may lengthen a
+bar, thicken a processor, add or detach a concourse, preserve an old apron as RON space,
+or reroute a road/service corridor. Irregularity is the record of those operations.
+Random notches that have no gate, road, circulation, utility, drainage, or phase cause do
+not satisfy this requirement.
 
 ---
 

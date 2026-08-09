@@ -19,6 +19,12 @@ related to the buildings they serve.
 This document describes the target appearance and relationships only. It does not propose
 an implementation in this pass.
 
+Standards cross-check: MWAA Design Manual 2020 supplies site, drainage, emergency-access,
+and operational-continuity causes for these shapes. FAA AC 150/5370-10H supplies
+construction material and lifecycle distinctions. IAC 9 and the real-diagram corpus
+remain authoritative for chart portrayal. A construction fact is not automatically a
+visible Airport Diagram feature.
+
 ## 1. How apron pavement reads on a diagram
 
 An apron is not simply “all gray area near a terminal.” It reads as four nested systems:
@@ -467,3 +473,64 @@ A convincing generated airport should satisfy the following observable condition
 - A fire station, fuel farm, or maintenance building without service pavement.
 - Randomly jagged apron edges whose vertices do not correspond to gates, routes, roads,
   safety areas, or development phases.
+
+## 14. Separate function, material, state, and portrayal
+
+The FAA construction review exposes four independent questions that the future surface
+model must answer:
+
+| Axis | Example values | Why it matters |
+|---|---|---|
+| Operational function | runway, taxiway, taxilane, terminal apron, cargo apron, road, shoulder, blast pad | Determines clearances, connectivity, traffic, and labels. |
+| Physical material | asphalt, fuel-resistant asphalt, concrete, aggregate-turf, gravel, turf, water | Determines construction compatibility and the plausibility of repairs or adjoining surfaces. |
+| Physical lifecycle | existing, new, overlaid, repaired, partially removed, fully removed, temporary | Determines which boundaries and phase seams physically exist. |
+| Operational availability | active, restricted, closed indefinitely, closed permanently, under construction, repurposed | Determines usable networks and operational notices. |
+| Marking state | standard, temporary, removed, obscured/ghosted, absent | Changes independently from both pavement material and availability. |
+| Publisher portrayal | FAA IAC screen, outline, closure X, construction symbol, publisher-specific material color | Is selected only after the preceding facts are known. |
+
+P-101 explicitly distinguishes preparation, overlay, removal, adjacent pavement that
+remains, and remarking. P-620 separately specifies marking application and temporary
+marking. P-401, P-404, P-501, and P-217 distinguish load-bearing asphalt, fuel-resistant
+surface course, concrete, and aggregate-turf. Those facts justify the axes above, but not
+an asphalt-versus-concrete texture in the default FAA chart profile: the checked FAA
+Airport Diagrams intentionally collapse most hard operating pavement into the same gray.
+
+This decomposition also resolves several ambiguous cases:
+
+- a physically present runway can be operationally closed and portrayed with closure
+  marks;
+- a removed runway segment can leave screened residual pavement outside the active
+  runway database;
+- a new taxiway can carry temporary markings before final application;
+- a fuel-resistant apron area remains functionally a terminal or cargo apron, not a
+  `fuel` object;
+- an aggregate-turf GA surface remains an operational surface even though it reads as
+  grass at casual inspection.
+
+## 15. Non-runway services that should shape pavement before they are drawn
+
+MWAA treats several civil systems as airport-wide obligations. They should enter the site
+constraint graph even when the FAA chart profile suppresses their detailed depiction:
+
+- **Drainage:** swales, storm pipes, culverts, trench drains, ponds, bioretention,
+  wetlands, and underground structures constrain grades, pavement edges, and buildable
+  islands. Apron notches and long edge changes may reserve these corridors.
+- **Deicing collection:** dedicated deicing areas need collection and treatment paths;
+  the model should preserve impermeable collection zones and downstream service space
+  rather than placing a generic pad wherever gray space remains.
+- **Spill containment:** fuel-delivery and pumping areas may require spill traps or oil
+  separation. This can create local courts and service access without changing the
+  default chart fill.
+- **Emergency access:** AOA and non-AOA facilities need continuous emergency-vehicle
+  routes. Fire-station courts and perimeter connections should be outcomes of that graph,
+  not isolated decorative rectangles.
+- **Perimeter/security access:** fences, vehicle gates, ditches, culverts, vegetation
+  control, and wildlife barriers interact. A perimeter road or fence should follow a
+  compatible route rather than independently crossing drainage and operating surfaces.
+- **Utilities and future development:** Sub-Area Plan utility corridors, setbacks, and
+  expansion envelopes can preserve white strips, split apron phases, or limit the depth
+  of a cargo or maintenance district.
+
+For the next implementation pass, these are **causal layers first and rendering layers
+second**. A layer becomes visible only if IAC 9, a selected publisher profile, or a
+specific diagram feature requires it.

@@ -3,8 +3,14 @@
 Success criterion: a single generated sheet reads as real to someone who knows FAA airport
 diagrams. Two layers: **the airport** (a plausible field generated from constraints) and
 **the chart** (an IAC-9-conformant rendering of it). Sources: IAC-9 (6 May 2025),
-AC 150/5300-13B, AC 150/5325-4B, AC 150/5360-13A, EB 89A, and survey of real diagrams
-(KIXD, KTYS, MSP, ORD, + ITH/PRC/ATL/JFK/IAD/DFW).
+AC 150/5300-13B, AC 150/5325-4B, AC 150/5360-13A, AC 150/5370-10H,
+FAA EB 89A, MWAA Design Manual 2020, and survey of real diagrams
+(KIXD, KTYS, MSP, ORD, + ITH/PRC/ATL/JFK/IAD/DFW and the wider checked-in corpus).
+
+Source boundary: airport-design and terminal-planning publications govern real-world
+geometry and relationships; construction specifications govern materials, installed
+assets, and physical lifecycle; IAC 9 and checked FAA diagrams govern chart selection and
+portrayal. Do not infer a chart symbol from a construction item alone.
 
 ---
 
@@ -26,6 +32,11 @@ derived, so everything on the sheet stays mutually consistent.
 - **Parcel**: a convex-ish boundary polygon sized to role (GA ≈ few hundred acres;
   constrained urban ≈ 900; greenfield hub ≈ 10,000+). Optionally one or two terrain/
   city edge constraints (a clipped corner, a river edge) that visibly shape the layout.
+- **Development context**: airport era, inherited facilities, buildable sub-area
+  envelopes, roads/transit approach, utility/drainage/perimeter corridors, historic or
+  shoreline constraints, and at least one reserved growth direction for commercial
+  roles. These are causal constraints; render only the subset required by the selected
+  chart profile.
 
 ### A2. Runways
 - Primary runway heading = prevailing wind axis (rounded to a real magnetic number;
@@ -50,10 +61,12 @@ derived, so everything on the sheet stays mutually consistent.
   building-free.
 
 ### A3. Taxiways
-- **Every active runway gets a full-length parallel taxiway** on its traffic side
-  (both sides where districts flank it), at 150–240 ft (GA) to 400–500 ft (hub) from
-  the runway CL. Busy fields add a **second (dual) parallel** between runway and
-  terminal apron.
+- An active runway with approach minimums below 1 mile gets a full-length parallel
+  taxiway; one is preferred for other instrument runways. A basic visual GA runway may
+  instead use end turnarounds/holding bays plus connectors. Place a parallel on its
+  traffic side (both sides where districts flank it), at 150–240 ft (GA) to 400–500 ft
+  (hub) from the runway CL. Busy fields add a **second (dual) parallel** between runway
+  and terminal apron.
 - Widths 25/35/50/75 ft by TDG. **All junctions filleted** — no square corners
   anywhere; wide flared throats where connectors meet runways.
 - Connectors: right-angle stubs at each runway end (entrance = two 90° turns), 1–3
@@ -76,8 +89,12 @@ derived, so everything on the sheet stays mutually consistent.
   fire stations (1 at GA fields, 2–4 spread mid-field at hubs), remote/RON apron and
   deice pads at hubs, run-up pads near GA runway ends.
 - **Terminal morphology** by role — this is the showpiece; silhouettes must be
-  intricate. (`terminal-design.md` is the authoritative reference: configuration
-  taxonomy, footprint dimensions, growth patterns, named real silhouettes.)
+  intricate. (`terminal-design.md` is the authoritative descriptive reference;
+  `terminal-generator-plan.md` defines the next implementation decomposition.) Choose a
+  program and site envelope before an archetype. Generate a typed flow graph connecting
+  landside access, processor, security/FIS as applicable, concourses/gates, baggage and
+  service access, apron taxilanes, taxiway throats, utilities, and emergency access. The
+  building and apron polygons are envelopes of that graph, not independent rectangles.
   - GA: none (hangar rows only).
   - Regional: linear slab, maybe one pier (Y/T shapes).
   - Mid-hub: pier terminal, 2–4 concourses, or two unit terminals.
@@ -87,14 +104,26 @@ derived, so everything on the sheet stays mutually consistent.
     processor mass + concourses (straight/L/T/Y) + satellite bars + courtyards; add
     irregular notches — real silhouettes are messy.
 - Terminal apron hugs the building outline (gate depth ≈ 200–300 ft of gray around
-  concourses), then apron taxilanes; apron edges meet taxiways at discrete staggered
-  throats, never a full-width bleed.
+  concourses), then apron taxilanes; apply a semantic offset only to gate-bearing faces,
+  preserve landside road courts and service/drainage voids, and derive discrete flared
+  taxiway throats from the internal circulation graph. Do not use one bounding rectangle
+  or repeated fixed-width edge steps.
 - Hangar grammar: T-hangar rows (long striped bars), box hangars (small squares),
   wide-body maintenance hangars at hubs (large rectangles near cargo). Tie-down grids
   on GA aprons (rows of small marks). Tower: near the core with sightlines, drawn as a
   small black shape + star when beaconed.
 - Buildings behind the BRL: setbacks grow with building size; nothing in RPZs or
   between hold lines and runways.
+- **Surface semantics are orthogonal.** Every paved or operational surface carries at
+  least: function, material, physical lifecycle, operational availability, and marking
+  state. Hard-surface materials include asphalt, fuel-resistant asphalt, and concrete;
+  soft/alternate surfaces include aggregate-turf, turf, and gravel where applicable.
+  Lifecycle and availability are segment-level, so partial removal, overlay, temporary
+  work, restriction, closure, and repurposing can coexist on one former route.
+- **Site-service systems constrain geometry:** drainage/deicing collection,
+  emergency/perimeter access, utilities, fences/gates, and landside roads remain
+  connected through all generated phases. They need not all render on an FAA Airport
+  Diagram.
 
 ### A5. Operational data (derived, chart-facing)
 - Frequencies scale with role: GA = CTAF/UNICOM (+ASOS); towered = ATIS, TOWER,
@@ -144,6 +173,9 @@ derived, so everything on the sheet stays mutually consistent.
   labeled `35°49'N` / `84°00'W` horizontally at line ends; lines pass under pavement.
 
 ### B4. Airfield symbology (IAC-9)
+- The renderer consumes a publisher-neutral airport model plus an explicit FAA-IAC
+  profile. It maps function/material/lifecycle/availability/marking facts to portrayal;
+  it never uses a visual style as the source of operational truth.
 - **Runways**: solid black to-scale bars. Per end: designator rotated to read along
   the runway from approach; `ELEV nnn`; magnetic heading to 0.1° with along-runway
   arrow. One `nnnnn X nnn` dimension per runway. Slope `0.n% UP/DOWN` + arrow where
@@ -157,7 +189,9 @@ derived, so everything on the sheet stays mutually consistent.
   with the distinct IAC-9 portrayals in §§3.5.2.2–3.5.2.4.
 - **Taxiways/aprons**: one flat #CFCFCF; taxiway letters plain black type set along
   the pavement, repeating along long taxiways; connector labels near their stub.
-  Non-movement areas may be hatched (diagonal lines) with a legend box.
+  Non-movement areas may be hatched (diagonal lines) with a legend box. Asphalt,
+  concrete, and fuel-resistant surface courses remain the same gray unless an explicitly
+  selected non-FAA publisher profile distinguishes materials.
 - **Buildings**: solid black silhouettes. Labels generic (`TERMINAL`, `HANGAR`, `FBO`,
   `CARGO RAMP`, `GENERAL AVIATION PARKING`, `FIRE STATION`, `FUEL FARM`, `ANG`),
   with thin straight leaders — forked when one label serves several shapes. `TWR nnnn`

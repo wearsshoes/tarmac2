@@ -20,6 +20,12 @@ The distinctions matter:
 This is an investigation artifact, not a commitment to support every publisher or every
 object listed.
 
+The FAA construction standards review adds a second guardrail. AC 150/5370-10H confirms
+that fences, drainage structures, wind cones, lighting systems, signs, markings, and
+multiple pavement materials are distinct installed asset families. Their presence in a
+construction specification does not mean the FAA Airport Diagram must portray each one.
+This inventory records a modeling gap separately from a default-rendering requirement.
+
 ## 1. Cartographic and geographic layers
 
 | Category | Current status | What the real diagrams contain |
@@ -48,7 +54,7 @@ layout is asymmetric.
 | Visual glide-slope indicators | Unmodeled | No PAPI/VASI/T-VASIS type, side, position, or aiming data. |
 | Arresting systems | Partial | EMAS is represented; cables, nets, barriers, and other arresting gear are not. |
 | Stopway/clearway/declarations | Partial | Blast pad and displacement exist, but stopway, clearway, TORA/TODA/ASDA/LDA records and their mapped limits do not. |
-| Surface and condition | Partial | PCN string exists, but surface material, shoulders, grooving, friction, contamination, and condition are not modeled. |
+| Surface material and condition | Partial | PCN string exists, but asphalt, fuel-resistant asphalt, concrete, aggregate-turf, turf/gravel, shoulders, grooving, friction, contamination, and condition are not modeled independently. |
 | Runway intersection elevations | Unmodeled | Only end elevations and a slope value exist; no surveyed intermediate elevation points. |
 | Alternate/secondary runway uses | Unmodeled | No water runway, ski strip, ultralight strip, or separate grass-strip grammar. |
 
@@ -63,7 +69,7 @@ layout is asymmetric.
 | Movement-area boundaries | Unmodeled | No non-movement line/hatching, ramp tower boundary, or controlled-area polygon. |
 | Stand/gate positions | Unmodeled | No stand ID, aircraft class, orientation, lead-in/lead-out, stop point, or gate relationship. |
 | Pushback and service circulation | Unmodeled | No pushback path, tug point, equipment lane, bus route, or head/tail service road. |
-| Surface construction/state | Partial | A whole runway may be closed; closed taxiway/apron segments, construction phases, barricades, and temporary routes are absent. |
+| Surface construction/state | Partial | A whole runway may be closed; preparation, overlay, partial removal, repair, closed taxiway/apron segments, construction phases, barricades, and temporary routes are absent. Physical lifecycle, operational availability, and marking state are collapsed. |
 | Bridges and tunnels | Unmodeled | No grade-separated taxiway/road/people-mover relationship. |
 | Deicing facilities | Schema-only in apron kind | `deice` is an allowed apron kind, but current generation does not produce the pad, bays, collection area, or operating geometry. |
 

@@ -449,3 +449,9 @@ This pass narrows several earlier corpus observations:
   now explicitly marked as non-default for the current FAA profile.
 - [`spec.md`](spec.md) has been corrected where field-elevation and closed-pavement wording
   could allow a portrayal that conflicts with IAC 9.
+- [`edit-plan.md`](edit-plan.md) is now the single active implementation backlog;
+  [`test-suite-spec.md`](test-suite-spec.md) turns the acceptance scenarios above into a
+  layered verification design.
+- AC 150/5370-10H adds material, physical-lifecycle, marking-installation, and located-
+  asset semantics, but it does not change this document's portrayal conclusions. IAC 9
+  remains the controlling source for FAA Airport Diagram content and symbology.

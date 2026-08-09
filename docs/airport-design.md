@@ -1,15 +1,18 @@
 # Airport Layout Design Principles for Synthetic FAA-Style Diagram Generation
 
-**Sources used (with substitutions noted):**
+**Sources used and their proper roles:**
 
-1. **MWAA Airports Authority Design Manual** (mwaa.com/business/airports-authority-design-manual) — landing page is thin; followed its links into the full **Design Manual 2020 PDF** (414 pp). Finding: this manual is almost entirely procedural (submittal process, codes, tenant standards, construction rules) and **defers all airfield geometry to FAA ACs**. It contributed the airside/landside organization facts and real-world parcel examples below, but not layout geometry.
-2. **FAA construction standards page** (faa.gov/airports/engineering/construction_standards) — returned HTTP 403. Substituted the official documents themselves, read in full:
-   - **AC 150/5300-13B Chg 1 (w/ errata), Airport Design** (2022/2024, 413 pp) — the primary geometric source.
-   - **AC 150/5325-4B, Runway Length Requirements for Airport Design** (2005).
-   - **AC 150/5360-13A, Airport Terminal Planning** (2018) — terminal concepts.
-   - **FAA Engineering Brief 89A, Taxiway Nomenclature Convention** (2022) — taxiway naming.
+1. **[MWAA Airports Authority Design Manual](https://www.mwaa.com/business/airports-authority-design-manual)** and the linked **Design Manual 2020** (414 pp). The manual is the governing policy and design-criteria framework for DCA and IAD. It defers AOA pavement geometry to current FAA criteria, but it adds important causal constraints: Master Plans and ALPs, Sub-Area Plans, development envelopes, setbacks, utility corridors, historic resources, operational continuity, landside systems, perimeter access, drainage, and site-specific facility relationships.
+2. **[FAA Airport Construction Standards](https://www.faa.gov/airports/engineering/construction_standards)** and **AC 150/5370-10H, Standard Specifications for Construction of Airports**. This is a materials, workmanship, installation, removal, and acceptance source. It supports a richer physical-state model for pavement, markings, fences, drainage, wind cones, and lighting, but it does **not** replace the airport-layout, terminal-planning, marking-design, or visual-aid-design ACs.
+3. **AC 150/5300-13B Chg 1 (w/ errata), Airport Design** (2022/2024, 413 pp) — the primary airfield geometric source.
+4. **AC 150/5325-4B, Runway Length Requirements for Airport Design** (2005).
+5. **AC 150/5360-13A, Airport Terminal Planning** (2018) — terminal concepts and passenger/aircraft/vehicle processing relationships.
+6. **FAA Engineering Brief 89A, Taxiway Nomenclature Convention** (2022) — taxiway naming.
 
-*(Pavement structure, drainage, lighting electrical, and materials sections skipped per scope.)*
+Source-domain rule: use design and planning publications to determine **what and where**;
+use construction specifications to determine **what it is made of and what physical work
+or lifecycle state exists**; use IAC 9 and checked FAA charts to determine **whether and
+how it appears on the Airport Diagram**.
 
 ## 1. The classification system that drives everything (AC 13B §1.6)
 
@@ -128,3 +131,73 @@ Centerline-to-centerline minimums — these produce the characteristic spacing f
 | Connectors | 2–4 right-angle stubs | end connectors + 30° high-speed exits, dual parallels, crossovers, holding bays |
 | Apron | tie-down grid + hangars, one side | midfield terminal apron, cargo campus, RON, deice pads |
 | RPZ per end | 1,000 × 250/450 ft | 2,500 × 1,000/1,750 ft |
+
+## 13. What the MWAA review adds to the site model
+
+MWAA does not supply a new generic terminal outline formula. It does show why an airport
+cannot be generated as runways plus leftover buildings:
+
+- The approved Master Plan, ALP, and ALUP govern long-range development. Sub-Area Plans
+  further divide cargo, airport/airline support, rental-car, and similar districts and
+  define development envelopes, setbacks, and utility corridors. A future generator
+  should therefore keep an explicit `SitePlan` or equivalent containing constrained
+  areas, planned districts, access corridors, and expansion reserves.
+- Compatibility is both operational and architectural. New facilities must preserve
+  safe movement and avoid aviation interference, but at a developed airport their scale,
+  proportions, sight lines, historic resources, and relationship to the existing campus
+  also matter. Layout variation should come from an airport era and inherited phases,
+  not arbitrary polygon noise.
+- Constructability reviews must preserve the active airport: AOA access, passenger
+  check-in, security screening, departures and arrivals, utilities, pedestrian and
+  vehicular access, and the movement of baggage, cargo, mail, goods, and supplies. These
+  are useful generation graphs even though most are not drawn directly on an FAA Airport
+  Diagram.
+- DCA and IAD demonstrate two useful site regimes. DCA is an approximately 860-acre,
+  historically and geographically constrained airport with an integrated landside
+  transit context. IAD is approximately 11,500 acres and contains a main terminal,
+  midfield concourses and parking aprons, cargo/support districts, roads, garages, and
+  rail infrastructure. These are anchors for constrained-urban and greenfield-hub modes,
+  not templates to reproduce literally.
+- MWAA identifies terminal entities at the facility level—DCA Terminal A and Terminal
+  B & C; IAD Main Terminal and Concourses A, B, and C/D. That hierarchy supports stable
+  terminal/concourse identity, but it is not evidence that every labeled entity should
+  be counted as a separate terminal building in a generated chart.
+
+## 14. What AC 150/5370-10H adds to the physical model
+
+The construction standard makes several distinctions that the current `SiteModel`
+collapses:
+
+1. **Material is not function.** P-401 asphalt, P-403 asphalt for smaller or non-full-
+   loading uses, P-404 fuel-resistant surface course, and P-501 cement concrete can all
+   occur within an airport. A fuel-resistant pavement does not by itself identify a fuel
+   farm, and an apron function does not uniquely imply a material.
+2. **Material is not chart portrayal.** Current FAA Airport Diagrams normally screen
+   taxiways and aprons with one pavement gray. Asphalt/concrete texture or color should
+   appear only when the selected publisher profile calls for it.
+3. **Physical lifecycle is segment-level.** P-101 separately addresses preparation,
+   removal, repair, overlay, and remarking while protecting adjacent pavement, utilities,
+   drainage, and base material that remain. A runway-wide `closed` boolean cannot express
+   removed sections, pavement remaining in place, phased replacement, or a temporary
+   connection.
+4. **Markings are their own installed layer.** P-620 covers preparation and application
+   of markings on runways, taxiways, and aprons, including temporary markings and removal.
+   Marking layout still comes from AC 150/5340-1 and the project plans. The data model
+   should not infer marking geometry merely because pavement exists.
+5. **Aggregate-turf is a real surface class.** P-217 permits aggregate-turf for certain
+   GA runways, taxiways, and adjacent shoulders serving ADG I and II aircraft. Grass,
+   turf-reinforced, aggregate-turf, gravel, asphalt, and concrete need distinct physical
+   semantics even when a particular chart profile simplifies their display.
+6. **Fences, drainage, wind cones, lights, and signs are independent assets.** F-162,
+   the D-series drainage items, L-107, and L-125 describe located systems assembled from
+   plans. They justify first-class site objects and relationships, not unconditional
+   visual clutter on every FAA chart.
+
+The required state decomposition for the next code pass is therefore:
+
+`surface function × material × physical lifecycle × operational availability × marking
+state × publisher portrayal`.
+
+Each axis must be queryable independently. For example, a physically present asphalt
+runway segment can be operationally closed, carry removed or temporary markings, and be
+portrayed as screened pavement with closure marks under IAC 9.

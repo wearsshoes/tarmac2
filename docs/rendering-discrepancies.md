@@ -253,3 +253,7 @@ This audit does not prescribe implementation, but the visual leverage is clear:
    navigation/sensor sites.
 5. Denser role-aware furniture and alternate page compositions.
 6. Fine typography and line-weight tuning after the map itself carries comparable detail.
+
+These findings are routed into the dependency-ordered `edit-plan.md`; terminal and apron
+items are expanded in `terminal-generator-plan.md`. This list should not be maintained as
+a second implementation backlog.
