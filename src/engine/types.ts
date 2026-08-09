@@ -65,7 +65,7 @@ export interface Taxiway {
   name: string;
   points: Point[];
   width: number;
-  kind: "parallel" | "connector" | "exit" | "apron-throat" | "service";
+  kind: "parallel" | "connector" | "exit" | "apron-throat" | "service" | "bay";
   runwayId?: string;
   /** Suppress the letter label (repair links, throat stubs). */
   unlabeled?: boolean;

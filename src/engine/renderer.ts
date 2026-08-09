@@ -412,8 +412,11 @@ function pavement(model: SiteModel, projection: Projection): string {
     out += `<path d="${path}" stroke-width="${num(width)}" stroke-linecap="butt" stroke-linejoin="round"/>`;
   }
   out += `</g><g id="pavement-fillets" fill="${GRAY}" stroke="none">`;
+  // Fillet and flare sizes scale with the taxiway design group (spec A2): heavier
+  // TDG fields have visibly larger junction pavement.
+  const tdgScale = { "2A": 0.85, "3": 1, "4": 1.15, "5": 1.3 }[model.design.tdg];
   for (const taxiway of model.taxiways) {
-    const radius = Math.max(1.4, projection.distance(taxiway.width) * 0.62);
+    const radius = Math.max(1.4, projection.distance(taxiway.width) * 0.62 * tdgScale);
     // Fillet patches at interior bends and at junction endpoints.
     for (const p of taxiway.points.slice(1)) {
       const q = projection.point(p);
@@ -430,11 +433,11 @@ function pavement(model: SiteModel, projection: Projection): string {
       const unit = { x: dir.x / len, y: dir.y / len };
       const side = perp(unit);
       const edge = add(start, vscale(unit, runway.width / 2));
-      const throatLength = Math.min(220, len * 0.5);
+      const throatLength = Math.min(220 * tdgScale, len * 0.5);
       const tip = add(edge, vscale(unit, throatLength));
       const flare: Polygon = [
-        add(edge, vscale(side, taxiway.width * 1.7)),
-        add(edge, vscale(side, -taxiway.width * 1.7)),
+        add(edge, vscale(side, taxiway.width * 1.7 * tdgScale)),
+        add(edge, vscale(side, -taxiway.width * 1.7 * tdgScale)),
         add(tip, vscale(side, -taxiway.width * 0.52)),
         add(tip, vscale(side, taxiway.width * 0.52)),
       ];

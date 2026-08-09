@@ -77,9 +77,37 @@ describe("population", () => {
       }
   });
 
-  // Phase 2 contract: connectivity repair must not draw straight chords across
-  // protected areas, and repair links are unlabeled service stubs.
-  test.todo("repair taxiways avoid RPZs and are unlabeled", () => {});
-  // Phase 2 contract: district sets vary across the population (no fixed zoo).
-  test.todo("district composition varies across seeds within each role", () => {});
+  test("repair taxiways avoid RPZs and are unlabeled", () => {
+    for (let i = 0; i < SWEEP; i++) {
+      const model = generate(`population-${i}`);
+      for (const taxiway of model.taxiways.filter((t) => t.id.startsWith("repair-"))) {
+        expect(taxiway.unlabeled).toBeTrue();
+        expect(taxiway.name).toBe("");
+        for (let k = 0; k < taxiway.points.length - 1; k++) {
+          const a = taxiway.points[k]!;
+          const b = taxiway.points[k + 1]!;
+          const mid = { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 };
+          for (const zone of model.protectionZones) {
+            expect(pointInPolygon(mid, zone)).toBeFalse();
+            expect(pointInPolygon(a, zone)).toBeFalse();
+          }
+        }
+      }
+    }
+  });
+
+  test("district composition varies across seeds within each role", () => {
+    for (const role of ["business-ga", "regional", "mid-hub"] as const) {
+      const sets = new Set<string>();
+      for (let i = 0; i < 40; i++) {
+        const model = generate(`district-set-${i}`, { role });
+        const kinds = new Set<string>([
+          ...model.aprons.map((apron) => apron.kind),
+          ...model.buildings.map((building) => building.kind),
+        ]);
+        sets.add([...kinds].sort().join(","));
+      }
+      expect(sets.size).toBeGreaterThanOrEqual(4);
+    }
+  });
 });

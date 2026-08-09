@@ -37,31 +37,40 @@ const reciprocalNumber = (n: number): number => ((n + 17) % 36) + 1;
 
 interface BankSlot { w: number; u: number; lengthScale: number; }
 
+/** Parallel separations and staggers drawn from the standard families actually
+ * charted (close dual, intermediate, wide independent), not one value per role. */
 function bankSlots(role: Role, rng: RNG, primaryLength: number): BankSlot[] {
-  const stagger = () => rng.float(-0.15, 0.15) * primaryLength;
+  const stagger = () => rng.float(-0.22, 0.22) * primaryLength;
   switch (role) {
     case "basic-ga": return [{ w: 0, u: 0, lengthScale: 1 }];
     case "business-ga":
       return rng.chance(0.22)
-        ? [{ w: 0, u: 0, lengthScale: 1 }, { w: -700, u: stagger(), lengthScale: rng.float(0.6, 0.75) }]
+        ? [{ w: 0, u: 0, lengthScale: 1 }, { w: -rng.pick([700, 1000]), u: stagger(), lengthScale: rng.float(0.6, 0.75) }]
         : [{ w: 0, u: 0, lengthScale: 1 }];
     case "regional": {
-      const sep = rng.pick([700, 2500]);
+      const sep = rng.pick([700, 1200, 2500, 3400]);
       return [{ w: sep / 2, u: 0, lengthScale: 1 }, { w: -sep / 2, u: stagger(), lengthScale: rng.float(0.72, 0.95) }];
     }
-    case "mid-hub": return [{ w: 1250, u: 0, lengthScale: 1 }, { w: -1250, u: stagger(), lengthScale: rng.float(0.8, 0.95) }];
-    case "major-hub": return [
-      { w: 2500, u: 0, lengthScale: 1 },
-      { w: 0, u: stagger(), lengthScale: rng.float(0.85, 1) },
-      { w: -2500, u: stagger(), lengthScale: rng.float(0.8, 0.92) },
-    ];
-    case "mega-hub": {
-      const gap = rng.pick([3900, 5200]);
+    case "mid-hub": {
+      const sep = rng.pick([2000, 2500, 3400]);
+      return [{ w: sep / 2, u: 0, lengthScale: 1 }, { w: -sep / 2, u: stagger(), lengthScale: rng.float(0.8, 0.95) }];
+    }
+    case "major-hub": {
+      const sep = rng.pick([2500, 3400, 4300]);
       return [
-        { w: gap / 2 + 700, u: stagger(), lengthScale: rng.float(0.85, 0.95) },
+        { w: sep, u: 0, lengthScale: 1 },
+        { w: 0, u: stagger(), lengthScale: rng.float(0.85, 1) },
+        { w: -sep, u: stagger(), lengthScale: rng.float(0.8, 0.92) },
+      ];
+    }
+    case "mega-hub": {
+      const gap = rng.pick([3900, 5200, 6600]);
+      const outer = rng.pick([700, 1000]);
+      return [
+        { w: gap / 2 + outer, u: stagger(), lengthScale: rng.float(0.85, 0.95) },
         { w: gap / 2, u: 0, lengthScale: 1 },
         { w: -gap / 2, u: stagger(), lengthScale: rng.float(0.9, 1) },
-        { w: -gap / 2 - 700, u: stagger(), lengthScale: rng.float(0.8, 0.9) },
+        { w: -gap / 2 - outer, u: stagger(), lengthScale: rng.float(0.8, 0.9) },
       ];
     }
   }
@@ -123,12 +132,14 @@ function frame(heading: number): { at: (u: number, w: number) => Point; axis: Po
 
 interface TaxiRoute { points: Point[]; width: number; kind: Taxiway["kind"]; runwayId?: string; connectorStation?: number; parentRoute?: number; unlabeled?: boolean; }
 
-/** Taxiway solver per harvest H4: parallels with threshold jogs, connector stations,
- * high-speed exits landing on the parallel, crossfield spines, letters assigned by
- * descending path length, connectors numbered from the canonical axis end. */
-function buildTaxiways(rng: RNG, runways: Runway[], role: Role, design: DesignCode, coreW: number): { taxiways: Taxiway[]; holds: HoldLine[] } {
+/** Taxiway solver per harvest H4 + Phase 2 topology density: parallels with
+ * threshold jogs, end-clustered connector cadence, angled threshold entrances,
+ * holding-bay lobes, flow-biased high-speed exits, dual-parallel crossovers,
+ * GA turnaround substitution, crossfield spines, letters by descending length. */
+function buildTaxiways(rng: RNG, runways: Runway[], role: Role, design: DesignCode, coreW: number): { taxiways: Taxiway[]; holds: HoldLine[]; pads: Apron[] } {
   const routes: TaxiRoute[] = [];
   const holds: HoldLine[] = [];
+  const pads: Apron[] = [];
   const hub = role.includes("hub");
   const open = runways.filter(isActive);
 
@@ -140,6 +151,50 @@ function buildTaxiways(rng: RNG, runways: Runway[], role: Role, design: DesignCo
     const side = Math.sign(coreW - centerW) || 1;
     const separation = design.runwayTaxiwaySeparation;
     const jog = rng.float(50, 100);
+    const canonical = Math.abs(runAxis.x) >= Math.abs(runAxis.y) ? (runAxis.x >= 0 ? 1 : -1) : (runAxis.y >= 0 ? 1 : -1);
+    const busy = runway.length >= 7400;
+
+    // Basic visual GA may substitute turnarounds for the full-length parallel
+    // (spec A3): unlabeled pavement pads at both ends plus plain connectors.
+    // The substitution only happens when both pads clear every other runway.
+    const padFor = (endpoint: Point, endIndex: number): Point[] => {
+      const inward = polar(runway.heading + (endIndex === 0 ? 0 : 180));
+      const across = scale(runLateral, side);
+      const lo = runway.width / 2 + 45;
+      return [
+        add(endpoint, scale(across, lo)),
+        add(add(endpoint, scale(inward, 320)), scale(across, lo)),
+        add(add(endpoint, scale(inward, 260)), scale(across, lo + 150)),
+        add(add(endpoint, scale(inward, 60)), scale(across, lo + 150)),
+      ];
+    };
+    const padClears = (pad: Point[]): boolean => runways.every((other) => {
+      if (other.id === runway.id) return true;
+      const [oa, ob] = runwayEndpoints(other.center, other.heading, other.length);
+      const clearance = other.width / 2 + 60;
+      return pad.every((point, index) => {
+        const next = pad[(index + 1) % pad.length]!;
+        return pointSegmentDistance(point, oa, ob) >= clearance && !segmentIntersection(oa, ob, point, next);
+      });
+    });
+    const candidatePads = [padFor(a, 0), padFor(b, 1)];
+    const turnaround = role === "basic-ga" && candidatePads.every(padClears) && rng.chance(runwayIndex === 0 ? 0.35 : 0.6);
+    if (turnaround) {
+      candidatePads.forEach((pad, endIndex) => {
+        pads.push({ id: `turnaround-${runway.id}-${endIndex}`, kind: "hold-pad", polygon: pad });
+      });
+      for (const t of [0.32, 0.68]) {
+        const runwayPoint = pointAlong(a, b, t);
+        routes.push({
+          kind: "connector", runwayId: runway.id, width: design.taxiwayWidth,
+          points: [runwayPoint, add(runwayPoint, scale(runLateral, side * separation))],
+          connectorStation: canonical > 0 ? t : 1 - t,
+        });
+        holds.push({ point: add(runwayPoint, scale(runLateral, side * design.holdDistance)), angle: runway.heading, runwayId: runway.id });
+      }
+      return;
+    }
+
     const parallelIndex = routes.length;
     // Threshold jogs: reverse-curve outward within ~1,500 ft of each end (holding-bay room).
     const jogT = Math.min(0.16, 1500 / runway.length);
@@ -154,8 +209,10 @@ function buildTaxiways(rng: RNG, runways: Runway[], role: Role, design: DesignCo
         add(add(b, scale(runLateral, side * (separation + jog))), scale(runAxis, 120)),
       ],
     });
-    // Dual parallel between the primary and the terminal at busy fields.
+    // Dual parallel between the primary and the terminal at busy fields, with
+    // crossover connectors so the pair reads as one system.
     if (hub && runwayIndex === 0) {
+      const dualIndex = routes.length;
       routes.push({
         kind: "parallel", runwayId: runway.id, width: design.taxiwayWidth,
         points: [
@@ -163,31 +220,74 @@ function buildTaxiways(rng: RNG, runways: Runway[], role: Role, design: DesignCo
           add(pointAlong(a, b, 0.95), scale(runLateral, side * (separation + 400))),
         ],
       });
+      for (const t of [rng.float(0.24, 0.34), rng.float(0.64, 0.76)]) {
+        if (!rng.chance(0.75)) continue;
+        routes.push({
+          kind: "connector", runwayId: runway.id, width: design.taxiwayWidth,
+          points: [
+            add(pointAlong(a, b, t), scale(runLateral, side * separation)),
+            add(pointAlong(a, b, t), scale(runLateral, side * (separation + 400))),
+          ],
+          parentRoute: dualIndex, connectorStation: canonical > 0 ? t : 1 - t,
+        });
+      }
     }
 
-    // Connector stations: thresholds always, middle 18–82% with ±3% jitter (harvest H4).
-    const midCount = Math.max(1, Math.min(5, Math.round(runway.length / 2400) - (role === "basic-ga" ? 1 : 0)));
+    // Connector cadence: thresholds always, an extra near-end pair on busy
+    // runways (the recognizable cluster), then a sparser midfield spread.
     const stations = [0.015, 0.985];
-    for (let i = 0; i < midCount; i++) stations.push(0.18 + (0.64 * (i + 0.5)) / midCount + rng.float(-0.03, 0.03));
+    if (busy) {
+      stations.push(0.052 + rng.float(-0.008, 0.014), 0.948 + rng.float(-0.014, 0.008));
+    }
+    const midCount = Math.max(1, Math.min(4, Math.round(runway.length / 3300) - (role === "basic-ga" ? 1 : 0)));
+    for (let i = 0; i < midCount; i++) stations.push(0.22 + (0.56 * (i + 0.5)) / midCount + rng.float(-0.045, 0.045));
     stations.sort((x, y) => x - y);
-    const canonical = Math.abs(runAxis.x) >= Math.abs(runAxis.y) ? (runAxis.x >= 0 ? 1 : -1) : (runAxis.y >= 0 ? 1 : -1);
     stations.forEach((t) => {
       const runwayPoint = pointAlong(a, b, t);
       const jogHere = t < jogT || t > 1 - jogT ? jog : 0;
       const taxiPoint = add(runwayPoint, scale(runLateral, side * (separation + jogHere)));
+      const isThreshold = t < 0.03 || t > 0.97;
+      // Busy thresholds get an angled entrance: the connector leans toward the
+      // runway end instead of meeting it square.
+      const points = busy && isThreshold
+        ? [runwayPoint, add(pointAlong(runwayPoint, taxiPoint, 0.5), scale(runAxis, (t < 0.5 ? -1 : 1) * separation * 0.38)), taxiPoint]
+        : [runwayPoint, taxiPoint];
       routes.push({
         kind: "connector", runwayId: runway.id, width: design.taxiwayWidth,
-        points: [runwayPoint, taxiPoint], parentRoute: parallelIndex,
+        points, parentRoute: parallelIndex,
         connectorStation: canonical > 0 ? t : 1 - t,
       });
-      holds.push({ point: add(runwayPoint, scale(runLateral, side * design.holdDistance)), angle: runway.heading, runwayId: runway.id, kind: design.visibility === "1200" && (t < 0.05 || t > 0.95) ? "ils" : undefined });
+      holds.push({ point: add(runwayPoint, scale(runLateral, side * design.holdDistance)), angle: runway.heading, runwayId: runway.id, kind: design.visibility === "1200" && isThreshold ? "ils" : undefined });
     });
 
-    // High-speed exits: 30° off, starting 58–68% down in the landing direction,
-    // run length separation/tan(30°) so the exit lands exactly on the parallel.
+    // Holding-bay lobes beside the jogged parallel near instrument thresholds:
+    // reverse-curve loops that leave and rejoin the parallel.
+    if (busy && (hub || design.visibility === "1200")) {
+      for (const endT of [0, 1]) {
+        if (!rng.chance(0.65)) continue;
+        const sign = endT === 0 ? 1 : -1;
+        const tA = endT === 0 ? 0.025 : 0.975;
+        const tB = endT === 0 ? 0.085 : 0.915;
+        const wBase = separation + jog;
+        routes.push({
+          kind: "bay", runwayId: runway.id, width: design.taxiwayWidth * 1.7, unlabeled: true,
+          points: [
+            add(pointAlong(a, b, tA), scale(runLateral, side * wBase)),
+            add(pointAlong(a, b, tA + sign * 0.018), scale(runLateral, side * (wBase + 130))),
+            add(pointAlong(a, b, tB - sign * 0.018), scale(runLateral, side * (wBase + 130))),
+            add(pointAlong(a, b, tB), scale(runLateral, side * wBase)),
+          ],
+        });
+      }
+    }
+
+    // High-speed exits: 30° off, landing exactly on the parallel. Presence and
+    // direction follow the landing flow instead of appearing in fixed pairs.
     if (runway.length >= 9000) {
+      const flow = rng.chance(0.5) ? 1 : -1;
       for (const dir of [1, -1] as const) {
-        const t0 = rng.float(0.58, 0.68);
+        if (!rng.chance(dir === flow ? 0.9 : 0.45)) continue;
+        const t0 = rng.float(0.56, 0.68);
         const t = dir === 1 ? t0 : 1 - t0;
         const start = pointAlong(a, b, t);
         const run = separation / Math.tan(Math.PI / 6);
@@ -198,6 +298,17 @@ function buildTaxiways(rng: RNG, runways: Runway[], role: Role, design: DesignCo
           points: [start, mid, land], parentRoute: parallelIndex,
           connectorStation: canonical > 0 ? t : 1 - t,
         });
+        // A second staggered exit in the dominant flow at the biggest fields.
+        if (dir === flow && role === "mega-hub" && rng.chance(0.5)) {
+          const t2 = dir === 1 ? t0 + 0.13 : 1 - t0 - 0.13;
+          const start2 = pointAlong(a, b, t2);
+          const land2 = add(add(start2, scale(runAxis, dir * run)), scale(runLateral, side * separation));
+          routes.push({
+            kind: "exit", runwayId: runway.id, width: design.taxiwayWidth,
+            points: [start2, add(pointAlong(start2, land2, 0.42), scale(runAxis, dir * run * 0.18)), land2], parentRoute: parallelIndex,
+            connectorStation: canonical > 0 ? t2 : 1 - t2,
+          });
+        }
       }
     }
   });
@@ -216,16 +327,33 @@ function buildTaxiways(rng: RNG, runways: Runway[], role: Role, design: DesignCo
     }
   }
 
+  // Delete connectors and exits that cross an active runway they do not serve —
+  // a short stub has no business crossing a foreign runway corridor.
+  const dropped = new Set<number>();
+  routes.forEach((route, index) => {
+    if (route.kind !== "connector" && route.kind !== "exit") return;
+    for (const other of open) {
+      if (other.id === route.runwayId) continue;
+      const [oa, ob] = runwayEndpoints(other.center, other.heading, other.length);
+      for (let k = 0; k < route.points.length - 1; k++) {
+        if (segmentIntersection(route.points[k]!, route.points[k + 1]!, oa, ob)) { dropped.add(index); return; }
+      }
+    }
+  });
+
   // Letters by descending path length (A is always the longest parallel), then
   // connector stubs <letter><digit> numbered from the canonical axis end.
+  // Orphan connectors (turnaround fields have no parallel) letter directly.
   const pathLength = (points: Point[]) => points.slice(1).reduce((sum, p, i) => sum + Math.hypot(p.x - points[i]!.x, p.y - points[i]!.y), 0);
-  const lettered = routes.map((route, index) => ({ route, index })).filter(({ route }) => route.kind === "parallel" || route.kind === "service");
+  const lettered = routes.map((route, index) => ({ route, index }))
+    .filter(({ route, index }) => !dropped.has(index) && !route.unlabeled &&
+      (route.kind === "parallel" || route.kind === "service" || (route.kind === "connector" && route.parentRoute === undefined)));
   lettered.sort((one, two) => pathLength(two.route.points) - pathLength(one.route.points));
   const names = new Map<number, string>();
   lettered.forEach(({ index }, i) => names.set(index, TAXI_LETTERS[i % TAXI_LETTERS.length]!));
   const byParent = new Map<number, { index: number; station: number }[]>();
   routes.forEach((route, index) => {
-    if (route.parentRoute === undefined) return;
+    if (route.parentRoute === undefined || dropped.has(index)) return;
     if (!byParent.has(route.parentRoute)) byParent.set(route.parentRoute, []);
     byParent.get(route.parentRoute)!.push({ index, station: route.connectorStation ?? 0 });
   });
@@ -235,21 +363,52 @@ function buildTaxiways(rng: RNG, runways: Runway[], role: Role, design: DesignCo
     children.forEach(({ index }, i) => names.set(index, `${letter}${Math.min(9, i + 1)}`));
   }
 
-  const taxiways: Taxiway[] = routes.map((route, index) => ({
-    id: `twy-${index}`,
-    name: names.get(index) ?? "Z9",
-    points: route.points,
-    width: route.width,
-    kind: route.kind,
-    runwayId: route.runwayId,
-    unlabeled: route.unlabeled,
-  }));
-  return { taxiways, holds };
+  const taxiways: Taxiway[] = routes.flatMap((route, index) => {
+    if (dropped.has(index)) return [];
+    const name = names.get(index) ?? "";
+    return [{
+      id: `twy-${index}`,
+      name,
+      points: route.points,
+      width: route.width,
+      kind: route.kind,
+      runwayId: route.runwayId,
+      unlabeled: route.unlabeled || name === "",
+    }];
+  });
+  return { taxiways, holds, pads };
 }
 
-/** Rng-free connectivity repair (harvest H4): union-find over taxiways, then bridge
- * the two largest components with straight links until one component remains. */
-function repairConnectivity(taxiways: Taxiway[], width: number): void {
+/** Rng-free connectivity repair (harvest H4 + Phase 2 routing quality): union-find
+ * over taxiways, then bridge the two largest components. Bridges route along the
+ * field frame (L-shaped corridors), never through an RPZ, and prefer paths that
+ * avoid crossing runways at all. */
+function repairConnectivity(taxiways: Taxiway[], width: number, zones: Point[][], runways: Runway[], heading: number): void {
+  const { axis, lateral } = frame(heading);
+  const uw = (p: Point): Point => ({ x: p.x * axis.x + p.y * axis.y, y: p.x * lateral.x + p.y * lateral.y });
+  const world = (c: Point): Point => add(scale(axis, c.x), scale(lateral, c.y));
+  const active = runways.filter(isActive).map((r) => runwayEndpoints(r.center, r.heading, r.length));
+
+  const segmentHitsZone = (a: Point, b: Point): boolean => zones.some((zone) => {
+    if (pointInPolygon(pointAlong(a, b, 0.5), zone)) return true;
+    for (let i = 0; i < zone.length; i++) {
+      if (segmentIntersection(a, b, zone[i]!, zone[(i + 1) % zone.length]!)) return true;
+    }
+    return false;
+  });
+  const pathScore = (points: Point[]): number => {
+    let crossings = 0;
+    let length = 0;
+    for (let i = 0; i < points.length - 1; i++) {
+      const p = points[i]!;
+      const q = points[i + 1]!;
+      if (segmentHitsZone(p, q)) return Number.POSITIVE_INFINITY;
+      for (const [ra, rb] of active) if (segmentIntersection(p, q, ra, rb)) crossings++;
+      length += Math.hypot(q.x - p.x, q.y - p.y);
+    }
+    return crossings * 50_000 + length;
+  };
+
   for (let pass = 0; pass < 24; pass++) {
     const parent = taxiways.map((_, i) => i);
     const find = (i: number): number => (parent[i] === i ? i : (parent[i] = find(parent[i]!)));
@@ -264,17 +423,42 @@ function repairConnectivity(taxiways: Taxiway[], width: number): void {
     });
     if (components.size <= 1) return;
     const sorted = [...components.values()].sort((one, two) => two.length - one.length);
-    const [big, next] = [sorted[0]!, sorted[1]!];
-    let best: { a: Point; b: Point; d: number } | null = null;
-    for (const i of big) for (const j of next) {
-      for (const p of taxiways[i]!.points) for (const q of taxiways[j]!.points) {
-        const d = Math.hypot(p.x - q.x, p.y - q.y);
-        if (!best || d < best.d) best = { a: p, b: q, d };
+    const big = sorted[0]!;
+    // Consider the closest endpoint pairs whose endpoints sit outside every RPZ,
+    // each via direct and jittered L-shaped corridor routes in the field frame.
+    // If the second-largest component has no such endpoints, try the others.
+    const outsideZones = (p: Point): boolean => zones.every((zone) => !pointInPolygon(p, zone));
+    let pairs: { a: Point; b: Point; d: number }[] = [];
+    for (const next of sorted.slice(1)) {
+      for (const i of big) for (const j of next) {
+        for (const p of taxiways[i]!.points) for (const q of taxiways[j]!.points) {
+          if (!outsideZones(p) || !outsideZones(q)) continue;
+          pairs.push({ a: p, b: q, d: Math.hypot(p.x - q.x, p.y - q.y) });
+        }
+      }
+      if (pairs.length > 0) break;
+    }
+    if (pairs.length === 0) return;
+    pairs.sort((one, two) => one.d - two.d);
+    let bestPath: Point[] | null = null;
+    let bestScore = Number.POSITIVE_INFINITY;
+    for (const { a, b } of pairs.slice(0, 12)) {
+      const ca = uw(a);
+      const cb = uw(b);
+      const candidates: Point[][] = [[a, b]];
+      for (const offset of [0, 700, -700, 1500, -1500]) {
+        candidates.push(
+          [a, world({ x: cb.x + offset, y: ca.y }), world({ x: cb.x + offset, y: cb.y }), b],
+          [a, world({ x: ca.x, y: cb.y + offset }), world({ x: cb.x, y: cb.y + offset }), b],
+        );
+      }
+      for (const path of candidates) {
+        const score = pathScore(path);
+        if (score < bestScore) { bestScore = score; bestPath = path; }
       }
     }
-    if (!best) return;
-    // Repair links are unlabeled service stubs, never lettered taxiways.
-    taxiways.push({ id: `repair-${pass}`, name: "", points: [best.a, best.b], width, kind: "service", unlabeled: true });
+    if (!bestPath || bestScore === Number.POSITIVE_INFINITY) return;
+    taxiways.push({ id: `repair-${pass}`, name: "", points: bestPath, width, kind: "service", unlabeled: true });
   }
 }
 
@@ -297,7 +481,7 @@ function compassName(point: Point): string {
 interface Districts { buildings: Building[]; aprons: Apron[]; throats: Taxiway[]; }
 
 /** District & facility zoo per harvest H5 cluster recipes. */
-function buildDistricts(rng: RNG, role: Role, archetype: TerminalArchetype, heading: number, primaryLength: number, side: number, outerW: number, networkW: number, design: DesignCode, runways: Runway[], complex: TerminalComplex | null, midfieldGap: [number, number] | null): Districts {
+function buildDistricts(rng: RNG, role: Role, archetype: TerminalArchetype, heading: number, primaryLength: number, side: number, outerW: number, networkW: number, design: DesignCode, runways: Runway[], zones: Point[][], complex: TerminalComplex | null, midfieldGap: [number, number] | null): Districts {
   const { at } = frame(heading);
   const ga = ROLE[role].ga;
   const hub = role.includes("hub");
@@ -307,8 +491,20 @@ function buildDistricts(rng: RNG, role: Role, archetype: TerminalArchetype, head
   const wAt = (w: number) => side * w;
   const uSpread = primaryLength / 2;
   // Clearance considers every runway with visible pavement, including non-active
-  // states and dotted future outlines — districts must not sit on any of them.
-  const clearOfRunways = (polygon: Point[], margin: number): boolean => runways.every((r) => {
+  // states and dotted future outlines — districts must not sit on any of them —
+  // and every runway protection zone, so cluster pavement never lands in an RPZ.
+  const clearOfZones = (polygon: Point[]): boolean => zones.every((zone) => {
+    if (polygon.some((point) => pointInPolygon(point, zone))) return false;
+    if (zone.some((corner) => pointInPolygon(corner, polygon))) return false;
+    for (let i = 0; i < polygon.length; i++) {
+      const a = polygon[i]!; const b = polygon[(i + 1) % polygon.length]!;
+      for (let j = 0; j < zone.length; j++) {
+        if (segmentIntersection(a, b, zone[j]!, zone[(j + 1) % zone.length]!)) return false;
+      }
+    }
+    return true;
+  });
+  const clearOfRunways = (polygon: Point[], margin: number): boolean => clearOfZones(polygon) && runways.every((r) => {
       const [ra, rb] = runwayEndpoints(r.center, r.heading, r.length);
       const clearance = margin + r.width / 2;
       if (polygon.some((point) => pointSegmentDistance(point, ra, rb) < clearance)) return false;
@@ -374,7 +570,8 @@ function buildDistricts(rng: RNG, role: Role, archetype: TerminalArchetype, head
     const clusterDepth = depth + 40 + 3 * 170 + 105;
     const uGA0 = archetype === "none" ? rng.float(-0.15, 0.1) * primaryLength : rng.pick([-1, 1]) * rng.float(0.55, 0.8) * uSpread;
     const uGA = slide(
-      [uGA0, uGA0 - 0.2 * primaryLength, uGA0 + 0.2 * primaryLength, uGA0 - 0.38 * primaryLength, uGA0 + 0.38 * primaryLength],
+      [uGA0, uGA0 - 0.2 * primaryLength, uGA0 + 0.2 * primaryLength, uGA0 - 0.38 * primaryLength, uGA0 + 0.38 * primaryLength,
+        uGA0 - 0.55 * primaryLength, uGA0 + 0.55 * primaryLength, uGA0 - 0.72 * primaryLength, uGA0 + 0.72 * primaryLength],
       (u) => [at(u - halfLen, gaSide * gaW), at(u + halfLen, gaSide * gaW), at(u + halfLen, gaSide * (gaW + clusterDepth)), at(u - halfLen, gaSide * (gaW + clusterDepth))],
       300,
     );
@@ -395,13 +592,15 @@ function buildDistricts(rng: RNG, role: Role, archetype: TerminalArchetype, head
     throats.push({ id: "ga-throat", name: "", points: [at(uGA, gaSide * gaW), at(uGA, gaSide * networkW)], width: 50, kind: "apron-throat", unlabeled: true });
   }
 
-  // Cargo campus, apart from the terminal, compass-8 named.
-  if (role !== "basic-ga") {
+  // Cargo campus, apart from the terminal, compass-8 named. Smaller fields only
+  // sometimes have one, so district sets vary across the population.
+  if (role !== "basic-ga" && (hub || rng.chance(role === "business-ga" ? 0.55 : 0.8))) {
     const uCargo0 = (terminalSpanU[1] > 0 ? 1 : -1) * rng.float(0.6, 0.85) * uSpread * (rng.chance(0.75) ? 1 : -1);
     const cargoSide = Math.abs(uCargo0) > Math.abs(terminalSpanU[1]) + 900 || archetype === "none" ? side : -side;
     const half = 320 + ga * 220;
     const uCargo = slide(
-      [uCargo0, uCargo0 - 0.18 * primaryLength, uCargo0 + 0.18 * primaryLength, uCargo0 - 0.34 * primaryLength, uCargo0 + 0.34 * primaryLength],
+      [uCargo0, uCargo0 - 0.18 * primaryLength, uCargo0 + 0.18 * primaryLength, uCargo0 - 0.34 * primaryLength, uCargo0 + 0.34 * primaryLength,
+        uCargo0 - 0.52 * primaryLength, uCargo0 + 0.52 * primaryLength, uCargo0 - 0.7 * primaryLength, uCargo0 + 0.7 * primaryLength],
       (u) => [at(u - half, cargoSide * (networkW + 170)), at(u + half, cargoSide * (networkW + 170)), at(u + half, cargoSide * (networkW + 810)), at(u - half, cargoSide * (networkW + 810))],
       300,
     );
@@ -417,8 +616,8 @@ function buildDistricts(rng: RNG, role: Role, archetype: TerminalArchetype, head
     throats.push({ id: "cargo-throat", name: "", points: [at(uCargo, cargoSide * (networkW + 200)), at(uCargo, cargoSide * networkW)], width: 60, kind: "apron-throat", unlabeled: true });
   }
 
-  // Fuel farm: 2×2 grid of tanks, labeled once.
-  {
+  // Fuel farm: 2×2 grid of tanks, labeled once; not universal at small fields.
+  if (hub || rng.chance(0.72)) {
     const uFuel0 = rng.pick([-1, 1]) * rng.float(0.85, 1) * uSpread;
     const uFuel = slide([uFuel0, -uFuel0, uFuel0 * 0.7, -uFuel0 * 0.7], (u) => rect(at(u, side * (networkW + 490)), 260, 260, -heading), 300);
     for (let i = 0; i < 4; i++) {
@@ -815,14 +1014,17 @@ export function generate(seed: string, options: GenerateOptions = {}): SiteModel
   }
   const coreWEffective = midfieldGap ? (midfieldGap[0] + midfieldGap[1]) / 2 : coreW;
 
+  // Only active runways carry runway protection zones. Zones are computed before
+  // connectivity repair so repair corridors can route around them.
+  const zones = protectionZones(runways.filter(isActive), design.visibility === "1200");
+
   const taxi = buildTaxiways(layout.derive("taxiways"), runways, role, design, coreWEffective);
-  const districts = buildDistricts(districtRng, role, archetype, heading, primaryLength, side, outerW, networkW, design, runways, complex, midfieldGap);
+  const districts = buildDistricts(districtRng, role, archetype, heading, primaryLength, side, outerW, networkW, design, runways, zones, complex, midfieldGap);
   taxi.taxiways.push(...districts.throats);
-  repairConnectivity(taxi.taxiways, design.taxiwayWidth);
+  repairConnectivity(taxi.taxiways, design.taxiwayWidth, zones, runways, heading);
+  districts.aprons.push(...taxi.pads);
 
   // --- Parcel: hull of everything + margin, with clipped corners ---
-  // Only active runways carry runway protection zones.
-  const zones = protectionZones(runways.filter(isActive), design.visibility === "1200");
   const contentPoints: Point[] = [
     ...runways.flatMap((r) => runwayEndpoints(r.center, r.heading, r.length)),
     ...zones.flat(),

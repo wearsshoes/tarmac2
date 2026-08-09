@@ -22,9 +22,13 @@ describe("runway and taxiway invariants", () => {
         expect(Math.abs(((runway.ends[1].magneticHeading - runway.ends[0].magneticHeading + 360) % 360) - 180)).toBeLessThan(0.01);
         const [a, b] = runwayEndpoints(runway.center, runway.heading, runway.length);
         expect(Math.hypot(a.x - b.x, a.y - b.y)).toBeCloseTo(runway.length, 5);
-        // The current generator always emits a full-length parallel. Spec A3's actual
-        // contract is weaker (see todo below); keep the stronger check while true.
-        expect(model.taxiways.some((t) => t.kind === "parallel" && t.runwayId === runway.id)).toBeTrue();
+        // Spec A3: instrument runways require a full-length parallel; basic visual
+        // GA may substitute validated turnarounds (checked in its own test below).
+        const hasParallel = model.taxiways.some((t) => t.kind === "parallel" && t.runwayId === runway.id);
+        if (role !== "basic-ga") expect(hasParallel).toBeTrue();
+        else if (!hasParallel) {
+          expect(model.taxiways.some((t) => t.kind === "connector" && t.runwayId === runway.id)).toBeTrue();
+        }
       }
       // Identifier grammar applies to labeled taxiways; repair links and throat
       // stubs are unlabeled service stubs with no name at all.
@@ -35,10 +39,27 @@ describe("runway and taxiway invariants", () => {
       expect(taxiwayComponents(model)).toBe(1);
     });
 
-  // Spec A3 contract (Phase 2/3): parallel required below one-mile minimums,
-  // preferred for other instrument runways; basic visual GA may use end
-  // turnarounds/holding bays + connectors instead.
-  test.todo("basic visual GA runways may substitute validated turnarounds for a full-length parallel", () => {});
+  // Spec A3: parallel required below one-mile minimums, preferred for other
+  // instrument runways; basic visual GA may substitute turnarounds + connectors.
+  test("basic visual GA runways may substitute validated turnarounds for a full-length parallel", () => {
+    let substituted = 0;
+    for (let i = 0; i < 50; i++) {
+      const model = generate(`turnaround-${i}`, { role: "basic-ga" });
+      for (const runway of model.runways.filter((r) => r.lifecycle === "active")) {
+        if (model.taxiways.some((t) => t.kind === "parallel" && t.runwayId === runway.id)) continue;
+        substituted++;
+        // Validated: unlabeled turnaround pavement near both ends + connectors.
+        const [a, b] = runwayEndpoints(runway.center, runway.heading, runway.length);
+        for (const end of [a, b]) {
+          const pad = model.aprons.find((apron) => apron.kind === "hold-pad" && !apron.label &&
+            apron.polygon.some((p) => Math.hypot(p.x - end.x, p.y - end.y) < 700));
+          expect(pad).toBeDefined();
+        }
+        expect(model.taxiways.filter((t) => t.kind === "connector" && t.runwayId === runway.id).length).toBeGreaterThanOrEqual(2);
+      }
+    }
+    expect(substituted).toBeGreaterThan(0);
+  });
 
   test("field elevation is the highest point on a runway", () => {
     for (let i = 0; i < 40; i++) {
@@ -59,21 +80,28 @@ describe("runway and taxiway invariants", () => {
   });
 
   test("parallel runway numbering and separations use standard families", () => {
+    const families = [700, 1000, 1200, 2000, 2500, 3400, 4300];
     const model = generate("parallel-3", { role: "major-hub" });
-    const headings = new Set(model.runways.map((r) => Math.round(r.heading)));
+    const open = model.runways.filter((r) => r.lifecycle === "active");
+    const headings = new Set(open.map((r) => Math.round(r.heading)));
     expect(headings.size).toBe(1);
-    const suffixes = model.runways.map((r) => r.ends[0].designator.slice(-1)).sort();
+    const suffixes = open.map((r) => r.ends[0].designator.slice(-1)).sort();
     expect(suffixes).toEqual(["C", "L", "R"]);
-    for (const runway of model.runways) {
+    for (const runway of open) {
       const [a, b] = [runway.ends[0].designator.slice(-1), runway.ends[1].designator.slice(-1)];
       if (a === "L") expect(b).toBe("R");
       if (a === "R") expect(b).toBe("L");
       if (a === "C") expect(b).toBe("C");
     }
-    const lateral = perp(polar(model.runways[0]!.heading));
-    const ws = model.runways.map((r) => r.center.x * lateral.x + r.center.y * lateral.y).sort((x, y) => x - y);
-    const separations = ws.slice(1).map((w, i) => Math.round(w - ws[i]!));
-    expect(separations.every((s) => Math.abs(s - 2500) < 100)).toBeTrue();
+    // Separations come from the standard families, across many seeds.
+    for (let i = 0; i < 25; i++) {
+      const m = generate(`separation-${i}`, { role: "major-hub" });
+      const bank = m.runways.filter((r) => r.lifecycle === "active" && Math.round(r.heading) === Math.round(m.windHeading));
+      const lateral = perp(polar(m.windHeading));
+      const ws = bank.map((r) => r.center.x * lateral.x + r.center.y * lateral.y).sort((x, y) => x - y);
+      const separations = ws.slice(1).map((w, k) => Math.round(w - ws[k]!));
+      for (const s of separations) expect(families.some((f) => Math.abs(s - f) < 100)).toBeTrue();
+    }
   });
 
   test("mega-hub banks renumber in chunks (LAX/ATL pattern)", () => {
